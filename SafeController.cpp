@@ -4,14 +4,17 @@ SafeController::SafeController(EepromLogger &logger,
                                PasswordManager &passwordManager,
                                Keypad &keypad,
                                Screen &screen,
-                               ServoLock &servoLock)
+                               ServoLock &servoLock,
+                               Buzzer &buzzer)
     : logger(logger),
       passwordManager(passwordManager),
       keypad(keypad),
       screen(screen),
       servoLock(servoLock),
+      buzzer(buzzer),
       state(SafeState::LOCKED),
       pinEntryState(PinEntryState::IDLE),
+      failedAttemptCount(0),
       pinLength(0)
 {
     // Zero-initialise the PIN buffer so it is always null-terminated.
@@ -24,8 +27,10 @@ SafeController::SafeController(EepromLogger &logger,
 void SafeController::begin()
 {
     servoLock.lock();
+    buzzer.begin();
     state = SafeState::LOCKED;
     pinEntryState = PinEntryState::IDLE;
+    failedAttemptCount = 0;
     showLockedUI();
     logger.logEvent(LogEventType::SYSTEM_BOOT);
 }
@@ -33,12 +38,14 @@ void SafeController::begin()
 void SafeController::update()
 {
     screen.update();
+    buzzer.update();
     handleKeypadInput();
 }
 
 bool SafeController::isLocked() const
 {
-    return state == SafeState::LOCKED;
+    // The safe is physically locked in both LOCKED and ALARM states.
+    return state != SafeState::UNLOCKED;
 }
 
 SafeState SafeController::getState() const
@@ -48,14 +55,17 @@ SafeState SafeController::getState() const
 
 void SafeController::lock()
 {
-    if (state == SafeState::LOCKED)
+    // Only transition from UNLOCKED — alarm state persists until correct PIN.
+    if (state != SafeState::UNLOCKED)
     {
         return;
     }
 
     servoLock.lock();
     state = SafeState::LOCKED;
+    failedAttemptCount = 0;
     showLockedUI();
+    buzzer.playLockSound();
     logger.logEvent(LogEventType::DOOR_LOCKED);
 }
 
@@ -68,7 +78,10 @@ void SafeController::unlock()
 
     servoLock.unlock();
     state = SafeState::UNLOCKED;
+    failedAttemptCount = 0;
     showUnlockedUI();
+    buzzer.stopAlarm();
+    buzzer.playUnlockSound();
     logger.logEvent(LogEventType::DOOR_UNLOCKED);
 }
 
@@ -117,6 +130,10 @@ void SafeController::handleDigitKey(char key)
     pinLength++;
     pinBuffer[pinLength] = '\0'; // Keep null-terminated.
     pinEntryState = PinEntryState::ENTERING;
+    if (state != SafeState::ALARM)
+    {
+        buzzer.playKeyPress();
+    }
     screen.printPinCode(pinBuffer, MAX_PIN_LENGTH, true);
 
     // Auto-confirm once all digits are entered.
@@ -129,6 +146,10 @@ void SafeController::handleDigitKey(char key)
 void SafeController::handleDeleteKey()
 {
     if (state == SafeState::UNLOCKED)
+        return;
+
+    // Block delete while alarm is active so the user must retype the full PIN.
+    if (state == SafeState::ALARM)
         return;
 
     if (pinLength == 0)
@@ -152,7 +173,7 @@ void SafeController::handleConfirmKey()
 {
     if (state == SafeState::UNLOCKED)
     {
-        // while open, lock the safe.
+        // While open, lock the safe.
         resetPinEntry();
         lock();
         return;
@@ -166,10 +187,21 @@ void SafeController::handleConfirmKey()
         return;
     }
 
-    // Wrong PIN
-    showWrongPinUI();
+    // Wrong PIN — either pre-alarm or during alarm.
+    failedAttemptCount++;
     logger.logEvent(LogEventType::WRONG_PIN);
     resetPinEntry();
+
+    if (failedAttemptCount >= MAX_FAILED_ATTEMPTS)
+    {
+        state = SafeState::ALARM;
+        buzzer.playAlarm();
+        showAlarmUI();
+        return;
+    }
+
+    showWrongPinUI();
+    buzzer.playIncorrectPinSound();
 }
 
 void SafeController::resetPinEntry()
@@ -204,6 +236,14 @@ void SafeController::showWrongPinUI()
     screen.print(F("Wrong PIN!"), 0);
     screen.setStatusIcon(0, SafeIcon::ALERT);
     screen.setStatusText(F("Try again"));
+}
+
+void SafeController::showAlarmUI()
+{
+    screen.clear();
+    screen.print(F("** ALARM **"), 0);
+    screen.setStatusIcon(0, SafeIcon::ALERT);
+    screen.setStatusText(F("Enter PIN"));
 }
 
 void SafeController::showEnterPinUI()

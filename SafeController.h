@@ -1,6 +1,7 @@
 #pragma once
 #include <Arduino.h>
 
+#include "Buzzer.h"
 #include "EepromLogger.h"
 #include "PasswordManager.h"
 #include "Keypad.h"
@@ -15,6 +16,7 @@ enum class SafeState : uint8_t
 {
     LOCKED,
     UNLOCKED,
+    ALARM,
 };
 
 enum class PinEntryState : uint8_t
@@ -28,15 +30,18 @@ class SafeController
 private:
     static constexpr uint8_t PIN_LENGTH = 4;
     static constexpr uint8_t MAX_PIN_LENGTH = 4;
+    static constexpr uint8_t MAX_FAILED_ATTEMPTS = 3;
 
     EepromLogger &logger;
     PasswordManager &passwordManager;
     Keypad &keypad;
     Screen &screen;
     ServoLock &servoLock;
+    Buzzer &buzzer;
 
     SafeState state;
     PinEntryState pinEntryState;
+    uint8_t failedAttemptCount;
 
     // PIN buffer. null-terminated
     char pinBuffer[MAX_PIN_LENGTH + 1];
@@ -54,6 +59,7 @@ private:
     void showUnlockedUI();
     void showWrongPinUI();
     void showEnterPinUI();
+    void showAlarmUI();
 
     void lock();
     void unlock();
@@ -63,7 +69,8 @@ public:
                    PasswordManager &passwordManager,
                    Keypad &keypad,
                    Screen &screen,
-                   ServoLock &servoLock);
+                   ServoLock &servoLock,
+                   Buzzer &buzzer);
 
     void begin();
     void update();

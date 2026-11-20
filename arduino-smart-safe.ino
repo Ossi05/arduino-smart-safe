@@ -4,9 +4,11 @@
 //   Keypad columns   D8, D9, D10, D11
 //   ServoLock        D3  (Timer 2 PWM)
 //   Screen (LCD)     SDA/SCL (A4/A5)
+//   Buzzer           D2  (PD2, active buzzer)
 // =============================================================================
 
 #include <Wire.h>
+#include "Buzzer.h"
 #include "EepromLogger.h"
 #include "PasswordManager.h"
 #include "Keypad.h"
@@ -23,8 +25,9 @@ PasswordManager passwordManager;
 Keypad keypad(KEYPAD_ROW_PINS, KEYPAD_COLUMN_PINS);
 Screen screen;
 ServoLock servoLock;
+Buzzer buzzer;
 
-SafeController safeController(logger, passwordManager, keypad, screen, servoLock);
+SafeController safeController(logger, passwordManager, keypad, screen, servoLock, buzzer);
 UartComms uartComms(safeController, logger, passwordManager);
 
 void setup()
