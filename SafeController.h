@@ -25,19 +25,6 @@ enum class PinEntryState : uint8_t
 
 class SafeController
 {
-public:
-    SafeController(EepromLogger &logger,
-                   PasswordManager &passwordManager,
-                   Keypad &keypad,
-                   Screen &screen,
-                   ServoLock &servoLock);
-
-    void begin();
-    void update();
-
-    bool isLocked() const;
-    SafeState getState() const;
-
 private:
     static constexpr uint8_t PIN_LENGTH = 4;
     static constexpr uint8_t MAX_PIN_LENGTH = 4;
@@ -55,9 +42,6 @@ private:
     char pinBuffer[MAX_PIN_LENGTH + 1];
     uint8_t pinLength;
 
-    void lock();
-    void unlock();
-
     // Keypad
     void handleKeypadInput();
     void handleDigitKey(char key);
@@ -70,4 +54,23 @@ private:
     void showUnlockedUI();
     void showWrongPinUI();
     void showEnterPinUI();
+
+    void lock();
+    void unlock();
+
+public:
+    SafeController(EepromLogger &logger,
+                   PasswordManager &passwordManager,
+                   Keypad &keypad,
+                   Screen &screen,
+                   ServoLock &servoLock);
+
+    void begin();
+    void update();
+
+    void remoteLock();
+    void remoteUnlock();
+
+    bool isLocked() const;
+    SafeState getState() const;
 };

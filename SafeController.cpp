@@ -213,3 +213,13 @@ void SafeController::showEnterPinUI()
     screen.setStatusIcon(0, SafeIcon::LOCKED);
     screen.setStatusText("Locked");
 }
+
+void SafeController::remoteLock()
+{
+    lock();
+}
+
+void SafeController::remoteUnlock()
+{
+    unlock();
+}

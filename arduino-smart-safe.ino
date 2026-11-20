@@ -13,6 +13,7 @@
 #include "Screen.h"
 #include "ServoLock.h"
 #include "SafeController.h"
+#include "UartComms.h"
 
 static const byte KEYPAD_ROW_PINS[4] = {4, 5, 6, 7};
 static const byte KEYPAD_COLUMN_PINS[4] = {8, 9, 10, 11};
@@ -24,11 +25,10 @@ Screen screen;
 ServoLock servoLock;
 
 SafeController safeController(logger, passwordManager, keypad, screen, servoLock);
+UartComms uartComms(safeController, logger, passwordManager);
 
 void setup()
 {
-    Serial.begin(9600);
-
     // Initialise storage layers first
     logger.begin();
     passwordManager.begin();
@@ -44,9 +44,13 @@ void setup()
 
     // Initialise the safe controller
     safeController.begin();
+
+    // Initialise UART
+    uartComms.begin();
 }
 
 void loop()
 {
     safeController.update();
+    uartComms.update();
 }
