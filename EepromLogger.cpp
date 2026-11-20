@@ -1,20 +1,20 @@
 #include "EepromLogger.h"
 #include "EepromStorage.h"
 
-String LogEvent::toString() const {
-    String eventName;
-
+const __FlashStringHelper* LogEvent::getEventName() const {
     switch (event) {
-        case LogEventType::SYSTEM_BOOT:     eventName = "System Boot";     break;
-        case LogEventType::DOOR_UNLOCKED:   eventName = "Door Unlocked";   break;
-        case LogEventType::DOOR_LOCKED:     eventName = "Door Locked";     break;
-        case LogEventType::WRONG_PIN:       eventName = "Wrong PIN";       break;
-        case LogEventType::ALARM_TRIGGERED: eventName = "ALARM TRIGGERED"; break;
-        case LogEventType::PIN_CHANGED:     eventName = "PIN Changed";     break;
-        default:                            eventName = "Unknown Event";   break;
+        case LogEventType::SYSTEM_BOOT:     return F("System Boot");
+        case LogEventType::DOOR_UNLOCKED:   return F("Door Unlocked");
+        case LogEventType::DOOR_LOCKED:     return F("Door Locked");
+        case LogEventType::WRONG_PIN:       return F("Wrong PIN");
+        case LogEventType::ALARM_TRIGGERED: return F("ALARM TRIGGERED");
+        case LogEventType::PIN_CHANGED:     return F("PIN Changed");
+        default:                            return F("Unknown Event");
     }
+}
 
-    return "[" + String(timestampSec) + "s] " + eventName;
+String LogEvent::toString() const {
+    return "[" + String(timestampSec) + "s] " + String(getEventName());
 }
 
 void EepromLogger::begin() {

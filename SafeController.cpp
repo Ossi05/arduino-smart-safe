@@ -117,7 +117,7 @@ void SafeController::handleDigitKey(char key)
     pinLength++;
     pinBuffer[pinLength] = '\0'; // Keep null-terminated.
     pinEntryState = PinEntryState::ENTERING;
-    screen.printPinCode(String(pinBuffer), MAX_PIN_LENGTH, true);
+    screen.printPinCode(pinBuffer, MAX_PIN_LENGTH, true);
 
     // Auto-confirm once all digits are entered.
     if (pinLength == MAX_PIN_LENGTH)
@@ -145,7 +145,7 @@ void SafeController::handleDeleteKey()
     }
 
     // Redraw without revealing a new digit.
-    screen.printPinCode(String(pinBuffer), MAX_PIN_LENGTH, false);
+    screen.printPinCode(pinBuffer, MAX_PIN_LENGTH, false);
 }
 
 void SafeController::handleConfirmKey()
@@ -185,33 +185,33 @@ void SafeController::resetPinEntry()
 void SafeController::showLockedUI()
 {
     screen.clear();
-    screen.print("Enter PIN:", 0);
+    screen.print(F("Enter PIN:"), 0);
     screen.setStatusIcon(0, SafeIcon::LOCKED);
-    screen.setStatusText("Locked");
+    screen.setStatusText(F("Locked"));
 }
 
 void SafeController::showUnlockedUI()
 {
     screen.clear();
-    screen.print("Safe Unlocked", 0);
+    screen.print(F("Safe Unlocked"), 0);
     screen.setStatusIcon(0, SafeIcon::UNLOCKED);
-    screen.setStatusText("# to lock");
+    screen.setStatusText(F("# to lock"));
 }
 
 void SafeController::showWrongPinUI()
 {
     screen.clear();
-    screen.print("Wrong PIN!", 0);
+    screen.print(F("Wrong PIN!"), 0);
     screen.setStatusIcon(0, SafeIcon::ALERT);
-    screen.setStatusText("Try again");
+    screen.setStatusText(F("Try again"));
 }
 
 void SafeController::showEnterPinUI()
 {
     screen.clear();
-    screen.print("Enter PIN:", 0);
+    screen.print(F("Enter PIN:"), 0);
     screen.setStatusIcon(0, SafeIcon::LOCKED);
-    screen.setStatusText("Locked");
+    screen.setStatusText(F("Locked"));
 }
 
 void SafeController::remoteLock()

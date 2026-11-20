@@ -5,15 +5,23 @@
 // Serial owns the USART0 interrupt and receive buffer through HardwareSerial.
 static constexpr uint32_t BAUD_RATE = 9600UL;
 
+static const char DESC_UNLOCK[] PROGMEM = "Unlock the safe";
+static const char DESC_LOCK[] PROGMEM = "Lock the safe";
+static const char DESC_STATUS[] PROGMEM = "Report current lock state";
+static const char DESC_LOGS[] PROGMEM = "Print all stored log events";
+static const char DESC_CLEAR_LOGS[] PROGMEM = "Erase all stored log events";
+static const char DESC_RESET_PW[] PROGMEM = "Reset PIN to default, or set a new one (e.g. reset password 1234)";
+static const char DESC_HELP[] PROGMEM = "List all available commands";
+
 const UartComms::Command UartComms::COMMANDS[] =
     {
-        {"unlock", "Unlock the safe", &UartComms::handleUnlock},
-        {"lock", "Lock the safe", &UartComms::handleLock},
-        {"status", "Report current lock state", &UartComms::handleStatus},
-        {"logs", "Print all stored log events", &UartComms::handleLogs},
-        {"clear logs", "Erase all stored log events", &UartComms::handleClearLogs},
-        {"reset password", "Reset PIN to default, or set a new one (e.g. reset password 1234)", &UartComms::handleResetPassword},
-        {"help", "List all available commands", &UartComms::handleHelp},
+        {"unlock", reinterpret_cast<const __FlashStringHelper *>(DESC_UNLOCK), &UartComms::handleUnlock},
+        {"lock", reinterpret_cast<const __FlashStringHelper *>(DESC_LOCK), &UartComms::handleLock},
+        {"status", reinterpret_cast<const __FlashStringHelper *>(DESC_STATUS), &UartComms::handleStatus},
+        {"logs", reinterpret_cast<const __FlashStringHelper *>(DESC_LOGS), &UartComms::handleLogs},
+        {"clear logs", reinterpret_cast<const __FlashStringHelper *>(DESC_CLEAR_LOGS), &UartComms::handleClearLogs},
+        {"reset password", reinterpret_cast<const __FlashStringHelper *>(DESC_RESET_PW), &UartComms::handleResetPassword},
+        {"help", reinterpret_cast<const __FlashStringHelper *>(DESC_HELP), &UartComms::handleHelp},
 };
 
 const uint8_t UartComms::COMMAND_COUNT =
@@ -34,8 +42,8 @@ void UartComms::begin()
 {
     Serial.begin(BAUD_RATE);
 
-    sendLine("=== Smart Safe UART ready ===");
-    sendLine("Type 'help' for a list of commands.");
+    sendLine(F("=== Smart Safe UART ready ==="));
+    sendLine(F("Type 'help' for a list of commands."));
 }
 
 void UartComms::update()
@@ -89,11 +97,21 @@ void UartComms::sendString(const char *text)
     }
 }
 
+void UartComms::sendString(const __FlashStringHelper *text)
+{
+    Serial.print(text);
+}
+
 void UartComms::sendLine(const char *text)
 {
     sendString(text);
     sendChar('\r');
     sendChar('\n');
+}
+
+void UartComms::sendLine(const __FlashStringHelper *text)
+{
+    Serial.println(text);
 }
 
 void UartComms::sendUnsignedInteger(uint16_t number)
@@ -124,32 +142,32 @@ void UartComms::handleCommandLine(char *commandLine)
         }
     }
 
-    sendString("Unknown command: '");
+    sendString(F("Unknown command: '"));
     sendString(commandLine);
-    sendLine("'  (type 'help' for a list)");
+    sendLine(F("'  (type 'help' for a list)"));
 }
 
 void UartComms::handleUnlock(const char * /*arguments*/)
 {
     safeController.remoteUnlock();
-    sendLine("[safe] Unlocked.");
+    sendLine(F("[safe] Unlocked."));
 }
 
 void UartComms::handleLock(const char * /*arguments*/)
 {
     safeController.remoteLock();
-    sendLine("[safe] Locked.");
+    sendLine(F("[safe] Locked."));
 }
 
 void UartComms::handleStatus(const char * /*arguments*/)
 {
     if (safeController.isLocked())
     {
-        sendLine("[status] LOCKED");
+        sendLine(F("[status] LOCKED"));
     }
     else
     {
-        sendLine("[status] UNLOCKED");
+        sendLine(F("[status] UNLOCKED"));
     }
 }
 
@@ -160,25 +178,27 @@ void UartComms::handleLogs(const char * /*arguments*/)
 
     if (eventCount == 0)
     {
-        sendLine("[logs] No events stored.");
+        sendLine(F("[logs] No events stored."));
         return;
     }
 
-    sendString("[logs] ");
+    sendString(F("[logs] "));
     sendUnsignedInteger(eventCount);
-    sendLine(" event(s):");
+    sendLine(F(" event(s):"));
 
     for (uint16_t eventIndex = 0; eventIndex < eventCount; eventIndex++)
     {
-        String eventString = storedEvents[eventIndex].toString();
-        sendLine(eventString.c_str());
+        sendChar('[');
+        sendUnsignedInteger(storedEvents[eventIndex].timestampSec);
+        sendString(F("s] "));
+        sendLine(storedEvents[eventIndex].getEventName());
     }
 }
 
 void UartComms::handleClearLogs(const char * /*arguments*/)
 {
     eepromLogger.clearLogs();
-    sendLine("[logs] All logs cleared.");
+    sendLine(F("[logs] All logs cleared."));
 }
 
 void UartComms::handleResetPassword(const char *arguments)
@@ -187,7 +207,7 @@ void UartComms::handleResetPassword(const char *arguments)
     {
         passwordManager.resetPassword();
         eepromLogger.logEvent(LogEventType::PIN_CHANGED);
-        sendLine("[password] Reset to default PIN.");
+        sendLine(F("[password] Reset to default PIN."));
         return;
     }
 
@@ -200,7 +220,7 @@ void UartComms::handleResetPassword(const char *arguments)
     {
         if (!isdigit(static_cast<unsigned char>(*pinCharacter)))
         {
-            sendLine("[password] Error: PIN must contain digits only.");
+            sendLine(F("[password] Error: PIN must contain digits only."));
             return;
         }
         pinLength++;
@@ -209,30 +229,30 @@ void UartComms::handleResetPassword(const char *arguments)
 
     if (pinLength != REQUIRED_PIN_LENGTH)
     {
-        sendLine("[password] Error: PIN must be exactly 4 digits.");
+        sendLine(F("[password] Error: PIN must be exactly 4 digits."));
         return;
     }
 
     if (passwordManager.setPassword(arguments))
     {
         eepromLogger.logEvent(LogEventType::PIN_CHANGED);
-        sendLine("[password] PIN changed successfully.");
+        sendLine(F("[password] PIN changed successfully."));
     }
     else
     {
-        sendLine("[password] Error: Failed to save new PIN.");
+        sendLine(F("[password] Error: Failed to save new PIN."));
     }
 }
 
 void UartComms::handleHelp(const char * /*arguments*/)
 {
-    sendLine("Available commands:");
+    sendLine(F("Available commands:"));
 
     for (uint8_t commandIndex = 0; commandIndex < COMMAND_COUNT; commandIndex++)
     {
-        sendString("  ");
+        sendString(F("  "));
         sendString(COMMANDS[commandIndex].name);
-        sendString("  --  ");
+        sendString(F("  --  "));
         sendLine(COMMANDS[commandIndex].description);
     }
 }

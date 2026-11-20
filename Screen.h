@@ -51,15 +51,24 @@ public:
 
     void clear();
     void print(const String &text, uint8_t row = 0);
+    void print(const char *text, uint8_t row = 0);
+    void print(const __FlashStringHelper *text, uint8_t row = 0);
 
     void printPinCode(
         const String &enteredPinCode,
         uint8_t maxPinCodeLength,
         bool revealLastDigit = true,
         unsigned long revealDurationMs = 600);
+    void printPinCode(
+        const char *enteredPinCode,
+        uint8_t maxPinCodeLength,
+        bool revealLastDigit = true,
+        unsigned long revealDurationMs = 600);
 
     void clearStatusRow();
     void setStatusText(const String &text);
+    void setStatusText(const char *text);
+    void setStatusText(const __FlashStringHelper *text);
     void setStatusIcon(uint8_t column, SafeIcon icon);
     void clearStatusIcon(uint8_t column);
 };

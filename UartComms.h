@@ -38,7 +38,9 @@ private:
 
     void sendChar(char character);
     void sendString(const char *text);
+    void sendString(const __FlashStringHelper *text);
     void sendLine(const char *text); // Sends text followed by "\r\n"
+    void sendLine(const __FlashStringHelper *text);
     void sendUnsignedInteger(uint16_t number);
 
     // ── Command dispatch ──────────────────────────────────────────────────────
@@ -61,8 +63,8 @@ private:
     // logs" before a hypothetical "clear").
     struct Command
     {
-        const char *name;        // Lowercase command string the user types
-        const char *description; // Shown by the "help" command
+        const char *name;                       // Lowercase command string the user types
+        const __FlashStringHelper *description; // Shown by the "help" command
         void (UartComms::*handler)(const char *arguments);
     };
 

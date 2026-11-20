@@ -65,6 +65,11 @@ void Screen::clear()
 
 void Screen::print(const String &text, uint8_t row)
 {
+    print(text.c_str(), row);
+}
+
+void Screen::print(const char *text, uint8_t row)
+{
     // Cancel the active PIN reveal timer if row 0 is overwritten
     if (row == 0)
     {
@@ -78,7 +83,7 @@ void Screen::print(const String &text, uint8_t row)
 
     setCursorPosition(0, row);
 
-    uint8_t textLength = text.length();
+    uint8_t textLength = text ? strlen(text) : 0;
 
     // Write the text and clear any remaining characters on the row
     for (uint8_t column = 0; column < columnCount; column++)
@@ -92,6 +97,48 @@ void Screen::print(const String &text, uint8_t row)
             sendLcdData(' ');
         }
     }
+}
+
+void Screen::print(const __FlashStringHelper *text, uint8_t row)
+{
+    // Cancel the active PIN reveal timer if row 0 is overwritten
+    if (row == 0)
+    {
+        isPinDigitRevealed = false;
+    }
+
+    if (row >= rowCount)
+    {
+        row = rowCount - 1;
+    }
+
+    setCursorPosition(0, row);
+
+    PGM_P p = reinterpret_cast<PGM_P>(text);
+    uint8_t column = 0;
+    while (column < columnCount)
+    {
+        char c = p ? pgm_read_byte(p) : '\0';
+        if (c != '\0')
+        {
+            sendLcdData(c);
+            p++;
+        }
+        else
+        {
+            sendLcdData(' ');
+        }
+        column++;
+    }
+}
+
+void Screen::printPinCode(
+    const char *enteredPinCode,
+    uint8_t maxPinCodeLength,
+    bool revealLastDigit,
+    unsigned long revealDurationMs)
+{
+    printPinCode(String(enteredPinCode), maxPinCodeLength, revealLastDigit, revealDurationMs);
 }
 
 void Screen::printPinCode(
@@ -165,6 +212,11 @@ void Screen::clearStatusRow()
 
 void Screen::setStatusText(const String &text)
 {
+    setStatusText(text.c_str());
+}
+
+void Screen::setStatusText(const char *text)
+{
     uint8_t startColumn = 2;
 
     if (startColumn >= columnCount)
@@ -174,14 +226,38 @@ void Screen::setStatusText(const String &text)
 
     setCursorPosition(startColumn, 1);
     uint8_t maxCharacters = columnCount - startColumn;
-    uint8_t textLength = text.length();
+    uint8_t textLength = text ? strlen(text) : 0;
 
     for (uint8_t index = 0;
          index < textLength && index < maxCharacters;
          index++)
     {
-
         sendLcdData(text[index]);
+    }
+}
+
+void Screen::setStatusText(const __FlashStringHelper *text)
+{
+    uint8_t startColumn = 2;
+
+    if (startColumn >= columnCount)
+    {
+        return;
+    }
+
+    setCursorPosition(startColumn, 1);
+    uint8_t maxCharacters = columnCount - startColumn;
+
+    PGM_P p = reinterpret_cast<PGM_P>(text);
+    for (uint8_t index = 0; index < maxCharacters; index++)
+    {
+        char c = p ? pgm_read_byte(p) : '\0';
+        if (c == '\0')
+        {
+            break;
+        }
+        sendLcdData(c);
+        p++;
     }
 }
 

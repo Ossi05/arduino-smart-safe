@@ -17,6 +17,7 @@ struct LogEvent
     LogEventType event;    // 1 byte
     uint32_t timestampSec; // 4 bytes
 
+    const __FlashStringHelper* getEventName() const;
     String toString() const;
 };
 
