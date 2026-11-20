@@ -1,7 +1,52 @@
+// =============================================================================
+// Hardware wiring:
+//   Keypad rows      D4, D5, D6, D7
+//   Keypad columns   D8, D9, D10, D11
+//   ServoLock        D3  (Timer 2 PWM)
+//   Screen (LCD)     SDA/SCL (A4/A5)
+// =============================================================================
 
-void setup() {
+#include <Wire.h>
+#include "EepromLogger.h"
+#include "PasswordManager.h"
+#include "Keypad.h"
+#include "Screen.h"
+#include "ServoLock.h"
+#include "SafeController.h"
 
+static const byte KEYPAD_ROW_PINS[4] = {4, 5, 6, 7};
+static const byte KEYPAD_COLUMN_PINS[4] = {8, 9, 10, 11};
+
+EepromLogger logger;
+PasswordManager passwordManager;
+Keypad keypad(KEYPAD_ROW_PINS, KEYPAD_COLUMN_PINS);
+Screen screen;
+ServoLock servoLock;
+
+SafeController safeController(logger, passwordManager, keypad, screen, servoLock);
+
+void setup()
+{
+    Serial.begin(9600);
+
+    // Initialise storage layers first
+    logger.begin();
+    passwordManager.begin();
+
+    // Initialise display
+    screen.begin(Wire);
+
+    // Initialise input (sets up Timer 1 ISR).
+    keypad.begin();
+
+    // Initialise servo (sets up Timer 2 PWM on D3).
+    servoLock.begin();
+
+    // Initialise the safe controller
+    safeController.begin();
 }
 
-void loop() {
+void loop()
+{
+    safeController.update();
 }

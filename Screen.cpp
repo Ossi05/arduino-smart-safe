@@ -12,10 +12,12 @@ Screen::Screen(uint8_t i2cAddress,
       maxPinCodeLength(4),
       isPinDigitRevealed(false),
       pinRevealStartTime(0),
-      pinRevealDurationMs(600) {
+      pinRevealDurationMs(600)
+{
 }
 
-void Screen::begin(TwoWire& i2cInterface) {
+void Screen::begin(TwoWire &i2cInterface)
+{
     this->i2cInterface = &i2cInterface;
     this->i2cInterface->begin();
 
@@ -38,10 +40,12 @@ void Screen::begin(TwoWire& i2cInterface) {
     loadDefaultCustomCharacters();
 }
 
-void Screen::update() {
+void Screen::update()
+{
     // Check whether the temporary last-digit reveal timer has expired
     if (isPinDigitRevealed &&
-        (millis() - pinRevealStartTime >= pinRevealDurationMs)) {
+        (millis() - pinRevealStartTime >= pinRevealDurationMs))
+    {
 
         isPinDigitRevealed = false;
 
@@ -50,7 +54,8 @@ void Screen::update() {
     }
 }
 
-void Screen::clear() {
+void Screen::clear()
+{
     isPinDigitRevealed = false;
     enteredPinCode = "";
 
@@ -58,13 +63,16 @@ void Screen::clear() {
     delayMicroseconds(2000);
 }
 
-void Screen::print(const String& text, uint8_t row) {
+void Screen::print(const String &text, uint8_t row)
+{
     // Cancel the active PIN reveal timer if row 0 is overwritten
-    if (row == 0) {
+    if (row == 0)
+    {
         isPinDigitRevealed = false;
     }
 
-    if (row >= rowCount) {
+    if (row >= rowCount)
+    {
         row = rowCount - 1;
     }
 
@@ -73,57 +81,68 @@ void Screen::print(const String& text, uint8_t row) {
     uint8_t textLength = text.length();
 
     // Write the text and clear any remaining characters on the row
-    for (uint8_t column = 0; column < columnCount; column++) {
-        if (column < textLength) {
+    for (uint8_t column = 0; column < columnCount; column++)
+    {
+        if (column < textLength)
+        {
             sendLcdData(text[column]);
         }
-        else {
+        else
+        {
             sendLcdData(' ');
         }
     }
 }
 
 void Screen::printPinCode(
-    const String& enteredPinCode,
+    const String &enteredPinCode,
     uint8_t maxPinCodeLength,
     bool revealLastDigit,
-    unsigned long revealDurationMs
-) {
+    unsigned long revealDurationMs)
+{
     this->enteredPinCode = enteredPinCode;
     this->maxPinCodeLength = maxPinCodeLength;
     this->pinRevealDurationMs = revealDurationMs;
 
-    if (revealLastDigit && this->enteredPinCode.length() > 0) {
+    if (revealLastDigit && this->enteredPinCode.length() > 0)
+    {
         isPinDigitRevealed = true;
         pinRevealStartTime = millis();
 
         renderPinCode(true);
     }
-    else {
+    else
+    {
         isPinDigitRevealed = false;
 
         renderPinCode(false);
     }
 }
 
-void Screen::renderPinCode(bool showLastDigit) {
+void Screen::renderPinCode(bool showLastDigit)
+{
     String displayLine = "PIN: ";
 
     uint8_t enteredDigitCount = enteredPinCode.length();
 
-    for (uint8_t index = 0; index < maxPinCodeLength; index++) {
+    for (uint8_t index = 0; index < maxPinCodeLength; index++)
+    {
 
-        if (index < enteredDigitCount) {
+        if (index < enteredDigitCount)
+        {
 
             // Reveal only the newest digit while the timer is active
-            if (showLastDigit && (index == enteredDigitCount - 1)) {
+            if (showLastDigit && (index == enteredDigitCount - 1))
+            {
                 displayLine += enteredPinCode[index];
             }
-            else {
+            else
+            {
                 displayLine += '*';
             }
         }
-        else {
+        else
+        {
             displayLine += '_';
         }
     }
@@ -133,35 +152,43 @@ void Screen::renderPinCode(bool showLastDigit) {
 
     uint8_t textLength = displayLine.length();
 
-    for (uint8_t column = 0; column < columnCount; column++) {
+    for (uint8_t column = 0; column < columnCount; column++)
+    {
         sendLcdData(column < textLength ? displayLine[column] : ' ');
     }
 }
 
-void Screen::clearStatusRow() {
+void Screen::clearStatusRow()
+{
     print("", 1);
 }
 
-void Screen::setStatusText(const String& text, uint8_t startColumn) {
-    if (startColumn >= columnCount) {
+void Screen::setStatusText(const String &text)
+{
+    uint8_t startColumn = 2;
+
+    if (startColumn >= columnCount)
+    {
         return;
     }
 
     setCursorPosition(startColumn, 1);
-
     uint8_t maxCharacters = columnCount - startColumn;
     uint8_t textLength = text.length();
 
     for (uint8_t index = 0;
          index < textLength && index < maxCharacters;
-         index++) {
+         index++)
+    {
 
         sendLcdData(text[index]);
     }
 }
 
-void Screen::setStatusIcon(uint8_t column, SafeIcon icon) {
-    if (column >= columnCount) {
+void Screen::setStatusIcon(uint8_t column, SafeIcon icon)
+{
+    if (column >= columnCount)
+    {
         return;
     }
 
@@ -169,8 +196,10 @@ void Screen::setStatusIcon(uint8_t column, SafeIcon icon) {
     sendLcdData(static_cast<uint8_t>(icon));
 }
 
-void Screen::clearStatusIcon(uint8_t column) {
-    if (column >= columnCount) {
+void Screen::clearStatusIcon(uint8_t column)
+{
+    if (column >= columnCount)
+    {
         return;
     }
 
@@ -178,7 +207,8 @@ void Screen::clearStatusIcon(uint8_t column) {
     sendLcdData(' ');
 }
 
-void Screen::loadDefaultCustomCharacters() {
+void Screen::loadDefaultCustomCharacters()
+{
 
     // 0: Closed lock
     const uint8_t lockedIcon[8] = {
@@ -189,8 +219,7 @@ void Screen::loadDefaultCustomCharacters() {
         0b11011,
         0b11011,
         0b11111,
-        0b00000
-    };
+        0b00000};
 
     // 1: Open lock
     const uint8_t unlockedIcon[8] = {
@@ -201,8 +230,7 @@ void Screen::loadDefaultCustomCharacters() {
         0b11011,
         0b11011,
         0b11111,
-        0b00000
-    };
+        0b00000};
 
     // 2: Bluetooth
     const uint8_t bluetoothIcon[8] = {
@@ -213,8 +241,7 @@ void Screen::loadDefaultCustomCharacters() {
         0b00100,
         0b01110,
         0b10101,
-        0b00110
-    };
+        0b00110};
 
     // 3: Battery
     const uint8_t batteryIcon[8] = {
@@ -225,8 +252,7 @@ void Screen::loadDefaultCustomCharacters() {
         0b11111,
         0b11111,
         0b11111,
-        0b00000
-    };
+        0b00000};
 
     // 4: Alert (!)
     const uint8_t alertIcon[8] = {
@@ -237,51 +263,49 @@ void Screen::loadDefaultCustomCharacters() {
         0b00100,
         0b00000,
         0b00100,
-        0b00000
-    };
+        0b00000};
 
     createCustomCharacter(
-        static_cast<uint8_t>(SafeIcon::LOCKED), lockedIcon
-    );
+        static_cast<uint8_t>(SafeIcon::LOCKED), lockedIcon);
 
     createCustomCharacter(
-        static_cast<uint8_t>(SafeIcon::UNLOCKED), unlockedIcon
-    );
+        static_cast<uint8_t>(SafeIcon::UNLOCKED), unlockedIcon);
 
     createCustomCharacter(
-        static_cast<uint8_t>(SafeIcon::BLUETOOTH), bluetoothIcon
-    );
+        static_cast<uint8_t>(SafeIcon::BLUETOOTH), bluetoothIcon);
 
     createCustomCharacter(
-        static_cast<uint8_t>(SafeIcon::BATTERY), batteryIcon
-    );
+        static_cast<uint8_t>(SafeIcon::BATTERY), batteryIcon);
 
     createCustomCharacter(
-        static_cast<uint8_t>(SafeIcon::ALERT), alertIcon
-    );
+        static_cast<uint8_t>(SafeIcon::ALERT), alertIcon);
 }
 
 void Screen::createCustomCharacter(
     uint8_t characterLocation,
-    const uint8_t characterBitmap[8]
-) {
+    const uint8_t characterBitmap[8])
+{
     characterLocation &= 0x07;
 
     sendLcdCommand(0x40 | (characterLocation << 3));
 
-    for (uint8_t row = 0; row < 8; row++) {
+    for (uint8_t row = 0; row < 8; row++)
+    {
         sendLcdData(characterBitmap[row]);
     }
 }
 
-void Screen::setCursorPosition(uint8_t column, uint8_t row) {
-    const uint8_t rowOffsets[] = { 0x00, 0x40 };
+void Screen::setCursorPosition(uint8_t column, uint8_t row)
+{
+    const uint8_t rowOffsets[] = {0x00, 0x40};
 
     sendLcdCommand(0x80 | (column + rowOffsets[row]));
 }
 
-void Screen::sendLcdCommand(uint8_t command) {
-    if (!i2cInterface) {
+void Screen::sendLcdCommand(uint8_t command)
+{
+    if (!i2cInterface)
+    {
         return;
     }
 
@@ -291,8 +315,10 @@ void Screen::sendLcdCommand(uint8_t command) {
     i2cInterface->endTransmission();
 }
 
-void Screen::sendLcdData(uint8_t data) {
-    if (!i2cInterface) {
+void Screen::sendLcdData(uint8_t data)
+{
+    if (!i2cInterface)
+    {
         return;
     }
 
