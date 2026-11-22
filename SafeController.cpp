@@ -5,13 +5,17 @@ SafeController::SafeController(EepromLogger &logger,
                                Keypad &keypad,
                                Screen &screen,
                                ServoLock &servoLock,
-                               Buzzer &buzzer)
+                               Buzzer &buzzer,
+                               Led &redLed,
+                               Led &greenLed)
     : logger(logger),
       passwordManager(passwordManager),
       keypad(keypad),
       screen(screen),
       servoLock(servoLock),
       buzzer(buzzer),
+      redLed(redLed),
+      greenLed(greenLed),
       state(SafeState::LOCKED),
       stateBeforeStatusDisplay(SafeState::LOCKED),
       failedAttemptCount(0),
@@ -31,8 +35,15 @@ void SafeController::begin()
 {
     servoLock.lock();
     buzzer.begin();
+    redLed.begin();
+    greenLed.begin();
+
+    // 2. Default state: locked, green LED off, red LED solid on.
     state = SafeState::LOCKED;
     failedAttemptCount = 0;
+    greenLed.off();
+    redLed.on();
+
     showLockedUI();
     logger.logEvent(LogEventType::SYSTEM_BOOT);
 }
@@ -41,6 +52,10 @@ void SafeController::update()
 {
     screen.update();
     buzzer.update();
+    redLed.update();
+    greenLed.update();
+
+    // 2. Check timers and timeouts.
     checkPinEntryTimeout();
     checkWrongPinDisplayTimeout();
     checkStatusDisplayTimeout();
@@ -73,6 +88,9 @@ void SafeController::lock()
     servoLock.lock();
     state = SafeState::LOCKED;
     failedAttemptCount = 0;
+
+    greenLed.off();
+    redLed.flashAndStayOn(3, 150);
     showLockedUI();
     buzzer.playLockSound();
     logger.logEvent(LogEventType::DOOR_LOCKED);
@@ -88,6 +106,11 @@ void SafeController::unlock()
     servoLock.unlock();
     state = SafeState::UNLOCKED;
     failedAttemptCount = 0;
+
+    redLed.off();
+    greenLed.flashAndStayOn(3, 150);
+
+    // 3. Update display and sound.
     showUnlockedUI();
     buzzer.stopAlarm();
     buzzer.playUnlockSound();
@@ -100,6 +123,8 @@ bool SafeController::changePassword(const char *newPin)
     {
         return false;
     }
+
+    greenLed.flash(3, 150);
     logger.logEvent(LogEventType::PIN_CHANGED);
     return true;
 }
@@ -257,12 +282,15 @@ void SafeController::handleConfirmKey()
     if (failedAttemptCount >= MAX_FAILED_ATTEMPTS)
     {
         state = SafeState::ALARM;
+        greenLed.off();
+        redLed.startContinuousFlash(200);
         buzzer.playAlarm();
         showAlarmUI();
         logger.logEvent(LogEventType::ALARM_TRIGGERED);
         return;
     }
 
+    redLed.flash(3, 120);
     showWrongPinUI();
     wrongPinDisplayStartTimeMs = millis();
     buzzer.playIncorrectPinSound();

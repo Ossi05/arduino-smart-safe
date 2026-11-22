@@ -3,8 +3,9 @@
 
 #include "Buzzer.h"
 #include "EepromLogger.h"
-#include "PasswordManager.h"
 #include "Keypad.h"
+#include "Led.h"
+#include "PasswordManager.h"
 #include "Screen.h"
 #include "ServoLock.h"
 #include "StatusDisplay.h"
@@ -39,13 +40,15 @@ private:
     Screen          &screen;
     ServoLock       &servoLock;
     Buzzer          &buzzer;
+    Led             &redLed;
+    Led             &greenLed;
 
     SafeState     state;
-    SafeState     stateBeforeStatusDisplay;  // State to restore on status exit.
+    SafeState     stateBeforeStatusDisplay;
     uint8_t       failedAttemptCount;
     StatusDisplay statusDisplay;
 
-    char          enteredPinBuffer[MAX_PIN_LENGTH + 1]; // null-terminated
+    char          enteredPinBuffer[MAX_PIN_LENGTH + 1];
     uint8_t       enteredPinLength;
     unsigned long lastDigitInputTimeMs;
     unsigned long wrongPinDisplayStartTimeMs;
@@ -89,7 +92,9 @@ public:
                    Keypad          &keypad,
                    Screen          &screen,
                    ServoLock       &servoLock,
-                   Buzzer          &buzzer);
+                   Buzzer          &buzzer,
+                   Led             &redLed,
+                   Led             &greenLed);
 
     void begin();
     void update();
@@ -100,6 +105,6 @@ public:
 
     void setBluetoothConnected(bool connected);
 
-    bool      isLocked()  const;
-    SafeState getState()  const;
+    bool      isLocked() const;
+    SafeState getState() const;
 };
