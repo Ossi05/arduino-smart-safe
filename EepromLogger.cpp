@@ -9,6 +9,7 @@ const __FlashStringHelper* LogEvent::getEventName() const {
         case LogEventType::WRONG_PIN:       return F("Wrong PIN");
         case LogEventType::ALARM_TRIGGERED: return F("ALARM TRIGGERED");
         case LogEventType::PIN_CHANGED:     return F("PIN Changed");
+        case LogEventType::WATCHDOG_RESET:  return F("Watchdog Reset");
         default:                            return F("Unknown Event");
     }
 }

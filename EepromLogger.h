@@ -10,6 +10,7 @@ enum class LogEventType : uint8_t
     WRONG_PIN = 0x04,
     ALARM_TRIGGERED = 0x05,
     PIN_CHANGED = 0x06,
+    WATCHDOG_RESET = 0x07,
 };
 
 struct LogEvent
@@ -17,7 +18,7 @@ struct LogEvent
     LogEventType event;    // 1 byte
     uint32_t timestampSec; // 4 bytes
 
-    const __FlashStringHelper* getEventName() const;
+    const __FlashStringHelper *getEventName() const;
     String toString() const;
 };
 

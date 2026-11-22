@@ -1,6 +1,7 @@
 #include "SafeController.h"
 
-SafeController::SafeController(EepromLogger &logger,
+SafeController::SafeController(WatchdogManager &watchdogManager,
+                               EepromLogger &logger,
                                PasswordManager &passwordManager,
                                Keypad &keypad,
                                Screen &screen,
@@ -8,7 +9,8 @@ SafeController::SafeController(EepromLogger &logger,
                                Buzzer &buzzer,
                                Led &redLed,
                                Led &greenLed)
-    : logger(logger),
+    : watchdogManager(watchdogManager),
+      logger(logger),
       passwordManager(passwordManager),
       keypad(keypad),
       screen(screen),
@@ -33,6 +35,7 @@ SafeController::SafeController(EepromLogger &logger,
 
 void SafeController::begin()
 {
+    // 1. Initialise hardware components
     servoLock.lock();
     buzzer.begin();
     redLed.begin();
@@ -45,17 +48,27 @@ void SafeController::begin()
     redLed.on();
 
     showLockedUI();
+
+    // 3. Log watchdog reboot error if detected, followed by system boot
+    if (watchdogManager.wasResetByWatchdog())
+    {
+        logger.logEvent(LogEventType::WATCHDOG_RESET);
+    }
     logger.logEvent(LogEventType::SYSTEM_BOOT);
 }
 
 void SafeController::update()
 {
+    // 1. Reset watchdog timer to maintain active execution heartbeat
+    watchdogManager.resetWatchdog();
+
+    // 2. Update hardware components
     screen.update();
     buzzer.update();
     redLed.update();
     greenLed.update();
 
-    // 2. Check timers and timeouts.
+    // 3. Check timers and timeouts.
     checkPinEntryTimeout();
     checkWrongPinDisplayTimeout();
     checkStatusDisplayTimeout();

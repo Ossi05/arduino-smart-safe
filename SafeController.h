@@ -9,6 +9,7 @@
 #include "Screen.h"
 #include "ServoLock.h"
 #include "StatusDisplay.h"
+#include "WatchdogManager.h"
 
 //  0-9 -> PIN digits
 //   * -> delete last digit (backspace); cancels password change when buffer is empty
@@ -34,6 +35,7 @@ private:
     static constexpr unsigned long  PIN_ENTRY_TIMEOUT_MS            = 5000;
     static constexpr unsigned long  WRONG_PIN_DISPLAY_DURATION_MS   = 3000;
 
+    WatchdogManager &watchdogManager;
     EepromLogger    &logger;
     PasswordManager &passwordManager;
     Keypad          &keypad;
@@ -87,7 +89,8 @@ private:
     void showPasswordChangedUI();
 
 public:
-    SafeController(EepromLogger    &logger,
+    SafeController(WatchdogManager &watchdogManager,
+                   EepromLogger    &logger,
                    PasswordManager &passwordManager,
                    Keypad          &keypad,
                    Screen          &screen,

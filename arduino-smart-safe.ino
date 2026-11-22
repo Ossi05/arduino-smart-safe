@@ -20,10 +20,12 @@
 #include "Screen.h"
 #include "ServoLock.h"
 #include "UartComms.h"
+#include "WatchdogManager.h"
 
 static const byte KEYPAD_ROW_PINS[4] = {4, 5, 6, 7};
 static const byte KEYPAD_COLUMN_PINS[4] = {8, 9, 10, 11};
 
+WatchdogManager watchdogManager;
 EepromLogger logger;
 PasswordManager passwordManager;
 Keypad keypad(KEYPAD_ROW_PINS, KEYPAD_COLUMN_PINS);
@@ -35,33 +37,40 @@ Buzzer buzzer;
 Led redLed(DDRB, PORTB, (1 << PB4));
 Led greenLed(DDRB, PORTB, (1 << PB5));
 
-SafeController safeController(logger, passwordManager, keypad, screen, servoLock, buzzer, redLed, greenLed);
+SafeController safeController(watchdogManager, logger, passwordManager, keypad, screen, servoLock, buzzer, redLed, greenLed);
 UartComms uartComms(safeController, logger, passwordManager);
 
 void setup()
 {
-    // Initialise storage layers first
+    // 1. Evaluate reset reason and clear MCUSR to prevent reboot loops
+    watchdogManager.checkAndClearResetReason();
+
+    // 2. Initialise storage layers first
     logger.begin();
     passwordManager.begin();
 
-    // Initialise display
+    // 3. Initialise display
     screen.begin(Wire);
 
-    // Initialise input (sets up Timer 1 ISR)
+    // 4. Initialise input (sets up Timer 1 ISR)
     keypad.begin();
 
-    // Initialise servo (sets up Timer 2 PWM on D3)
+    // 5. Initialise servo (sets up Timer 2 PWM on D3)
     servoLock.begin();
 
-    // Initialise safe controller (initialises LEDs, buzzer, lock, and default locked state)
+    // 6. Initialise safe controller (handles watchdog logging and default locked state)
     safeController.begin();
 
-    // Initialise UART
+    // 7. Initialise UART and warn if watchdog reset occurred
     uartComms.begin();
+
+    // 8. Configure and arm the Watchdog Timer with a 2-second timeout
+    watchdogManager.begin();
 }
 
 void loop()
 {
+    watchdogManager.resetWatchdog();
     safeController.update();
     uartComms.update();
 }
