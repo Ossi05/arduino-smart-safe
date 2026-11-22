@@ -10,6 +10,7 @@ static const char DESC_LOCK[] PROGMEM = "Lock the safe";
 static const char DESC_STATUS[] PROGMEM = "Report current lock state";
 static const char DESC_LOGS[] PROGMEM = "Print all stored log events";
 static const char DESC_CLEAR_LOGS[] PROGMEM = "Erase all stored log events";
+static const char DESC_CHANGE_PW[] PROGMEM = "Change PIN: change password <oldPin> <newPin>";
 static const char DESC_RESET_PW[] PROGMEM = "Reset PIN to default, or set a new one (e.g. reset password 1234)";
 static const char DESC_HELP[] PROGMEM = "List all available commands";
 
@@ -20,6 +21,7 @@ const UartComms::Command UartComms::COMMANDS[] =
         {"status", reinterpret_cast<const __FlashStringHelper *>(DESC_STATUS), &UartComms::handleStatus},
         {"logs", reinterpret_cast<const __FlashStringHelper *>(DESC_LOGS), &UartComms::handleLogs},
         {"clear logs", reinterpret_cast<const __FlashStringHelper *>(DESC_CLEAR_LOGS), &UartComms::handleClearLogs},
+        {"change password", reinterpret_cast<const __FlashStringHelper *>(DESC_CHANGE_PW), &UartComms::handleChangePassword},
         {"reset password", reinterpret_cast<const __FlashStringHelper *>(DESC_RESET_PW), &UartComms::handleResetPassword},
         {"help", reinterpret_cast<const __FlashStringHelper *>(DESC_HELP), &UartComms::handleHelp},
 };
@@ -149,13 +151,13 @@ void UartComms::handleCommandLine(char *commandLine)
 
 void UartComms::handleUnlock(const char * /*arguments*/)
 {
-    safeController.remoteUnlock();
+    safeController.unlock();
     sendLine(F("[safe] Unlocked."));
 }
 
 void UartComms::handleLock(const char * /*arguments*/)
 {
-    safeController.remoteLock();
+    safeController.lock();
     sendLine(F("[safe] Locked."));
 }
 
@@ -199,6 +201,96 @@ void UartComms::handleClearLogs(const char * /*arguments*/)
 {
     eepromLogger.clearLogs();
     sendLine(F("[logs] All logs cleared."));
+}
+
+void UartComms::handleChangePassword(const char *arguments)
+{
+    static constexpr uint8_t REQUIRED_PIN_LENGTH = 4;
+
+    // 1. Expect exactly two PIN arguments separated by a space.
+    if (arguments == nullptr || arguments[0] == '\0')
+    {
+        sendLine(F("[password] Usage: change password <oldPin> <newPin>"));
+        return;
+    }
+
+    // 2. Locate the space that separates old PIN from new PIN.
+    const char *spacePosition = nullptr;
+    for (const char *character = arguments; *character != '\0'; character++)
+    {
+        if (*character == ' ')
+        {
+            spacePosition = character;
+            break;
+        }
+    }
+
+    if (spacePosition == nullptr)
+    {
+        sendLine(F("[password] Usage: change password <oldPin> <newPin>"));
+        return;
+    }
+
+    // 3. Measure and validate the old PIN segment.
+    uint8_t oldPinLength = static_cast<uint8_t>(spacePosition - arguments);
+    if (oldPinLength != REQUIRED_PIN_LENGTH)
+    {
+        sendLine(F("[password] Error: Old PIN must be exactly 4 digits."));
+        return;
+    }
+
+    char oldPinBuffer[REQUIRED_PIN_LENGTH + 1];
+    for (uint8_t i = 0; i < REQUIRED_PIN_LENGTH; i++)
+    {
+        if (!isdigit(static_cast<unsigned char>(arguments[i])))
+        {
+            sendLine(F("[password] Error: PIN must contain digits only."));
+            return;
+        }
+        oldPinBuffer[i] = arguments[i];
+    }
+    oldPinBuffer[REQUIRED_PIN_LENGTH] = '\0';
+
+    // 4. Verify the old PIN.
+    if (!passwordManager.isCorrectPassword(oldPinBuffer))
+    {
+        sendLine(F("[password] Error: Old PIN is incorrect."));
+        return;
+    }
+
+    // 5. Locate and validate the new PIN segment.
+    const char *newPin = spacePosition + 1;
+    while (*newPin == ' ')
+    {
+        newPin++;
+    }
+
+    uint8_t newPinLength = 0;
+    for (const char *character = newPin; *character != '\0'; character++)
+    {
+        if (!isdigit(static_cast<unsigned char>(*character)))
+        {
+            sendLine(F("[password] Error: PIN must contain digits only."));
+            return;
+        }
+        newPinLength++;
+    }
+
+    if (newPinLength != REQUIRED_PIN_LENGTH)
+    {
+        sendLine(F("[password] Error: New PIN must be exactly 4 digits."));
+        return;
+    }
+
+    // 6. Apply the new PIN.
+    if (safeController.changePassword(newPin))
+    {
+        sendLine(F("[password] PIN changed successfully."));
+    }
+    else
+    {
+        sendLine(F("[password] Error: Failed to save new PIN."));
+    }
 }
 
 void UartComms::handleResetPassword(const char *arguments)

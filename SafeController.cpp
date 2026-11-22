@@ -13,14 +13,17 @@ SafeController::SafeController(EepromLogger &logger,
       servoLock(servoLock),
       buzzer(buzzer),
       state(SafeState::LOCKED),
-      pinEntryState(PinEntryState::IDLE),
+      stateBeforeStatusDisplay(SafeState::LOCKED),
       failedAttemptCount(0),
-      pinLength(0)
+      statusDisplay(screen),
+      enteredPinLength(0),
+      lastDigitInputTimeMs(0),
+      wrongPinDisplayStartTimeMs(0)
 {
     // Zero-initialise the PIN buffer so it is always null-terminated.
     for (uint8_t i = 0; i <= MAX_PIN_LENGTH; i++)
     {
-        pinBuffer[i] = '\0';
+        enteredPinBuffer[i] = '\0';
     }
 }
 
@@ -29,7 +32,6 @@ void SafeController::begin()
     servoLock.lock();
     buzzer.begin();
     state = SafeState::LOCKED;
-    pinEntryState = PinEntryState::IDLE;
     failedAttemptCount = 0;
     showLockedUI();
     logger.logEvent(LogEventType::SYSTEM_BOOT);
@@ -39,13 +41,15 @@ void SafeController::update()
 {
     screen.update();
     buzzer.update();
+    checkPinEntryTimeout();
+    checkWrongPinDisplayTimeout();
+    checkStatusDisplayTimeout();
     handleKeypadInput();
 }
 
 bool SafeController::isLocked() const
 {
-    // The safe is physically locked in both LOCKED and ALARM states.
-    return state != SafeState::UNLOCKED;
+    return state != SafeState::UNLOCKED && state != SafeState::CHANGING_PASSWORD;
 }
 
 SafeState SafeController::getState() const
@@ -53,10 +57,15 @@ SafeState SafeController::getState() const
     return state;
 }
 
+void SafeController::setBluetoothConnected(bool connected)
+{
+    statusDisplay.setBluetoothConnected(connected);
+}
+
 void SafeController::lock()
 {
-    // Only transition from UNLOCKED — alarm state persists until correct PIN.
-    if (state != SafeState::UNLOCKED)
+    // Only transition from states where the servo is open.
+    if (state != SafeState::UNLOCKED && state != SafeState::CHANGING_PASSWORD)
     {
         return;
     }
@@ -85,6 +94,16 @@ void SafeController::unlock()
     logger.logEvent(LogEventType::DOOR_UNLOCKED);
 }
 
+bool SafeController::changePassword(const char *newPin)
+{
+    if (!passwordManager.setPassword(newPin))
+    {
+        return false;
+    }
+    logger.logEvent(LogEventType::PIN_CHANGED);
+    return true;
+}
+
 void SafeController::handleKeypadInput()
 {
     while (keypad.hasQueuedKey())
@@ -102,9 +121,15 @@ void SafeController::handleKeypadInput()
             break;
 
         case 'A':
-        case 'B':
+            handleStatusDisplayKey();
+            break;
         case 'C':
+            handleChangePasswordKey();
+            break;
         case 'D':
+            handleCancelKey();
+            break;
+        case 'B':
             break;
         default:
             if (key >= '0' && key <= '9')
@@ -116,28 +141,32 @@ void SafeController::handleKeypadInput()
     }
 }
 
-void SafeController::handleDigitKey(char key)
+void SafeController::handleDigitKey(char digit)
 {
-    // Return if already unlocked
-    if (state == SafeState::UNLOCKED)
+    if (state == SafeState::UNLOCKED || state == SafeState::STATUS_DISPLAY)
         return;
 
-    // Return if the PIN buffer is already full
-    if (pinLength >= MAX_PIN_LENGTH)
+    if (enteredPinLength >= MAX_PIN_LENGTH)
         return;
 
-    pinBuffer[pinLength] = key;
-    pinLength++;
-    pinBuffer[pinLength] = '\0'; // Keep null-terminated.
-    pinEntryState = PinEntryState::ENTERING;
+    // 1. Append digit to buffer.
+    enteredPinBuffer[enteredPinLength] = digit;
+    enteredPinLength++;
+    enteredPinBuffer[enteredPinLength] = '\0';
+    lastDigitInputTimeMs = millis();
+    wrongPinDisplayStartTimeMs = 0; // Dismiss wrong-PIN screen as soon as typing resumes.
+
+    // 2. Play keypress sound
     if (state != SafeState::ALARM)
     {
         buzzer.playKeyPress();
     }
-    screen.printPinCode(pinBuffer, MAX_PIN_LENGTH, true);
 
-    // Auto-confirm once all digits are entered.
-    if (pinLength == MAX_PIN_LENGTH)
+    // 3. Redraw the PIN row
+    refreshPinDisplay(true);
+
+    // 4. Auto-confirm once all digits are entered
+    if (enteredPinLength == MAX_PIN_LENGTH)
     {
         handleConfirmKey();
     }
@@ -145,73 +174,313 @@ void SafeController::handleDigitKey(char key)
 
 void SafeController::handleDeleteKey()
 {
+    if (state == SafeState::STATUS_DISPLAY)
+        return;
+
     if (state == SafeState::UNLOCKED)
         return;
 
-    // Block delete while alarm is active so the user must retype the full PIN.
+    // During an alarm the user must retype the full PIN block backspace.
     if (state == SafeState::ALARM)
         return;
 
-    if (pinLength == 0)
-        return;
-
-    pinLength--;
-    pinBuffer[pinLength] = '\0';
-
-    if (pinLength == 0)
+    if (enteredPinLength == 0)
     {
-        pinEntryState = PinEntryState::IDLE;
-        showLockedUI();
+        // If changing the password, pressing * on an empty buffer cancels the change.
+        if (state == SafeState::CHANGING_PASSWORD)
+        {
+            cancelPasswordChange();
+        }
         return;
     }
 
-    // Redraw without revealing a new digit.
-    screen.printPinCode(pinBuffer, MAX_PIN_LENGTH, false);
+    // 2. Remove last digit and redraw.
+    enteredPinLength--;
+    enteredPinBuffer[enteredPinLength] = '\0';
+    lastDigitInputTimeMs = millis();
+
+    if (enteredPinLength == 0)
+    {
+        // Buffer is now empty — restore the prompt for the current state.
+        if (state == SafeState::CHANGING_PASSWORD)
+        {
+            showEnterNewPinUI();
+        }
+        else
+        {
+            showLockedUI();
+        }
+        return;
+    }
+
+    refreshPinDisplay(false);
 }
 
 void SafeController::handleConfirmKey()
 {
+    if (state == SafeState::STATUS_DISPLAY)
+        return;
+
+    // 1. While open, # locks the safe.
     if (state == SafeState::UNLOCKED)
     {
-        // While open, lock the safe.
-        resetPinEntry();
+        resetPinBuffer();
         lock();
         return;
     }
 
-    // Verify the entered PIN.
-    if (pinLength == MAX_PIN_LENGTH && passwordManager.isCorrectPassword(pinBuffer))
+    // 2. Finalise new password entry.
+    if (state == SafeState::CHANGING_PASSWORD)
     {
-        resetPinEntry();
+        confirmNewPassword();
+        return;
+    }
+
+    // 3. Require a full PIN before evaluating, pressing # on a partial entry
+    //    is a no-op, not a failed attempt.
+    if (enteredPinLength < MAX_PIN_LENGTH)
+        return;
+
+    // 4. Correct PIN -> unlock.
+    if (passwordManager.isCorrectPassword(enteredPinBuffer))
+    {
+        resetPinBuffer();
         unlock();
         return;
     }
 
-    // Wrong PIN — either pre-alarm or during alarm.
+    // 5. Wrong PIN.
     failedAttemptCount++;
     logger.logEvent(LogEventType::WRONG_PIN);
-    resetPinEntry();
+    resetPinBuffer();
 
     if (failedAttemptCount >= MAX_FAILED_ATTEMPTS)
     {
         state = SafeState::ALARM;
         buzzer.playAlarm();
         showAlarmUI();
+        logger.logEvent(LogEventType::ALARM_TRIGGERED);
         return;
     }
 
     showWrongPinUI();
+    wrongPinDisplayStartTimeMs = millis();
     buzzer.playIncorrectPinSound();
 }
 
-void SafeController::resetPinEntry()
+void SafeController::handleChangePasswordKey()
+{
+    // If the status display is open, check whether the safe was unlocked before entering it.
+    if (state == SafeState::STATUS_DISPLAY)
+    {
+        if (stateBeforeStatusDisplay != SafeState::UNLOCKED)
+        {
+            return;
+        }
+
+        // Close the status display without restoring the unlocked screen first,
+        // so we can go straight to the password-change screen.
+        statusDisplay.deactivate();
+        state = SafeState::UNLOCKED;
+    }
+
+    if (state != SafeState::UNLOCKED)
+    {
+        return;
+    }
+
+    // Enter password-change mode and prompt for the new PIN.
+    resetPinBuffer();
+    state = SafeState::CHANGING_PASSWORD;
+    showEnterNewPinUI();
+}
+
+void SafeController::handleStatusDisplayKey()
+{
+    if (state == SafeState::STATUS_DISPLAY)
+    {
+        bool lastPageReached = statusDisplay.showNextPage();
+        if (lastPageReached)
+        {
+            exitStatusDisplay();
+        }
+        return;
+    }
+
+    // Status Display is not available during an active alarm.
+    if (state == SafeState::ALARM)
+        return;
+
+    enterStatusDisplay();
+}
+
+void SafeController::resetPinBuffer()
 {
     for (uint8_t i = 0; i <= MAX_PIN_LENGTH; i++)
     {
-        pinBuffer[i] = '\0';
+        enteredPinBuffer[i] = '\0';
     }
-    pinLength = 0;
-    pinEntryState = PinEntryState::IDLE;
+    enteredPinLength = 0;
+    lastDigitInputTimeMs = 0;
+}
+
+void SafeController::refreshPinDisplay(bool revealLastDigit)
+{
+    screen.printPinCode(enteredPinBuffer, MAX_PIN_LENGTH, revealLastDigit);
+}
+
+void SafeController::cancelPinEntry()
+{
+    resetPinBuffer();
+
+    if (state == SafeState::CHANGING_PASSWORD)
+    {
+        showEnterNewPinUI();
+    }
+    else if (state == SafeState::ALARM)
+    {
+        showAlarmUI();
+    }
+    else
+    {
+        showLockedUI();
+    }
+}
+
+void SafeController::checkPinEntryTimeout()
+{
+    if (enteredPinLength == 0 || state == SafeState::UNLOCKED)
+        return;
+
+    if (state == SafeState::STATUS_DISPLAY)
+        return;
+
+    if (millis() - lastDigitInputTimeMs >= PIN_ENTRY_TIMEOUT_MS)
+    {
+        cancelPinEntry();
+    }
+}
+
+void SafeController::checkWrongPinDisplayTimeout()
+{
+    if (wrongPinDisplayStartTimeMs == 0)
+        return;
+
+    if (millis() - wrongPinDisplayStartTimeMs >= WRONG_PIN_DISPLAY_DURATION_MS)
+    {
+        wrongPinDisplayStartTimeMs = 0;
+        showLockedUI();
+    }
+}
+
+void SafeController::handleCancelKey()
+{
+    // D always exits Status Display immediately, regardless of prior state.
+    if (state == SafeState::STATUS_DISPLAY)
+    {
+        exitStatusDisplay();
+        return;
+    }
+
+    if (state == SafeState::UNLOCKED)
+        return;
+
+    cancelPinEntry();
+}
+
+void SafeController::enterStatusDisplay()
+{
+    stateBeforeStatusDisplay = state;
+    state = SafeState::STATUS_DISPLAY;
+    resetPinBuffer();
+    statusDisplay.activate();
+}
+
+void SafeController::exitStatusDisplay()
+{
+    statusDisplay.deactivate();
+    state = stateBeforeStatusDisplay;
+
+    // Restore the correct screen for the state we are returning to.
+    switch (state)
+    {
+    case SafeState::UNLOCKED:
+        showUnlockedUI();
+        break;
+
+    case SafeState::CHANGING_PASSWORD:
+        showEnterNewPinUI();
+        break;
+
+    case SafeState::ALARM:
+        showAlarmUI();
+        break;
+
+    case SafeState::LOCKED:
+    default:
+        showLockedUI();
+        break;
+    }
+}
+
+void SafeController::checkStatusDisplayTimeout()
+{
+    if (state != SafeState::STATUS_DISPLAY)
+        return;
+
+    bool didTimeout = statusDisplay.checkAutoExitTimeout();
+    if (didTimeout)
+    {
+        state = stateBeforeStatusDisplay;
+
+        switch (state)
+        {
+        case SafeState::UNLOCKED:
+            showUnlockedUI();
+            break;
+
+        case SafeState::CHANGING_PASSWORD:
+            showEnterNewPinUI();
+            break;
+
+        case SafeState::ALARM:
+            showAlarmUI();
+            break;
+
+        case SafeState::LOCKED:
+        default:
+            showLockedUI();
+            break;
+        }
+    }
+}
+
+void SafeController::confirmNewPassword()
+{
+    if (enteredPinLength != MAX_PIN_LENGTH)
+    {
+        return;
+    }
+
+    if (changePassword(enteredPinBuffer))
+    {
+        resetPinBuffer();
+        state = SafeState::UNLOCKED;
+        showPasswordChangedUI();
+        buzzer.playUnlockSound();
+    }
+    else
+    {
+        resetPinBuffer();
+        showEnterNewPinUI();
+    }
+}
+
+void SafeController::cancelPasswordChange()
+{
+    resetPinBuffer();
+    state = SafeState::UNLOCKED;
+    showUnlockedUI();
 }
 
 void SafeController::showLockedUI()
@@ -246,20 +515,18 @@ void SafeController::showAlarmUI()
     screen.setStatusText(F("Enter PIN"));
 }
 
-void SafeController::showEnterPinUI()
+void SafeController::showEnterNewPinUI()
 {
     screen.clear();
-    screen.print(F("Enter PIN:"), 0);
-    screen.setStatusIcon(0, SafeIcon::LOCKED);
-    screen.setStatusText(F("Locked"));
+    screen.print(F("New PIN:"), 0);
+    screen.setStatusIcon(0, SafeIcon::UNLOCKED);
+    screen.setStatusText(F("* cancel"));
 }
 
-void SafeController::remoteLock()
+void SafeController::showPasswordChangedUI()
 {
-    lock();
-}
-
-void SafeController::remoteUnlock()
-{
-    unlock();
+    screen.clear();
+    screen.print(F("PIN changed!"), 0);
+    screen.setStatusIcon(0, SafeIcon::UNLOCKED);
+    screen.setStatusText(F("# to lock"));
 }

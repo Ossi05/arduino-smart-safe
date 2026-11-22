@@ -7,77 +7,99 @@
 #include "Keypad.h"
 #include "Screen.h"
 #include "ServoLock.h"
+#include "StatusDisplay.h"
 
-//  0-9 ->  PIN digits
-//   * -> delete last digit (backspace)
+//  0-9 -> PIN digits
+//   * -> delete last digit (backspace); cancels password change when buffer is empty
 //   # -> confirm PIN / lock
+//   A -> enter Status Display (cycles pages on each press); D exits
+//   C -> enter password-change mode (only when unlocked)
+//   D -> cancel current PIN entry and return to the previous screen
 
 enum class SafeState : uint8_t
 {
     LOCKED,
     UNLOCKED,
     ALARM,
-};
-
-enum class PinEntryState : uint8_t
-{
-    IDLE,     // Waiting for the first keypress
-    ENTERING, // User is typing digits
+    CHANGING_PASSWORD,
+    STATUS_DISPLAY,
 };
 
 class SafeController
 {
 private:
-    static constexpr uint8_t PIN_LENGTH = 4;
-    static constexpr uint8_t MAX_PIN_LENGTH = 4;
-    static constexpr uint8_t MAX_FAILED_ATTEMPTS = 3;
+    static constexpr uint8_t        MAX_PIN_LENGTH                  = 4;
+    static constexpr uint8_t        MAX_FAILED_ATTEMPTS             = 3;
+    static constexpr unsigned long  PIN_ENTRY_TIMEOUT_MS            = 5000;
+    static constexpr unsigned long  WRONG_PIN_DISPLAY_DURATION_MS   = 3000;
 
-    EepromLogger &logger;
+    EepromLogger    &logger;
     PasswordManager &passwordManager;
-    Keypad &keypad;
-    Screen &screen;
-    ServoLock &servoLock;
-    Buzzer &buzzer;
+    Keypad          &keypad;
+    Screen          &screen;
+    ServoLock       &servoLock;
+    Buzzer          &buzzer;
 
-    SafeState state;
-    PinEntryState pinEntryState;
-    uint8_t failedAttemptCount;
+    SafeState     state;
+    SafeState     stateBeforeStatusDisplay;  // State to restore on status exit.
+    uint8_t       failedAttemptCount;
+    StatusDisplay statusDisplay;
 
-    // PIN buffer. null-terminated
-    char pinBuffer[MAX_PIN_LENGTH + 1];
-    uint8_t pinLength;
+    char          enteredPinBuffer[MAX_PIN_LENGTH + 1]; // null-terminated
+    uint8_t       enteredPinLength;
+    unsigned long lastDigitInputTimeMs;
+    unsigned long wrongPinDisplayStartTimeMs;
 
-    // Keypad
+    // Keypad routing
     void handleKeypadInput();
-    void handleDigitKey(char key);
+    void handleDigitKey(char digit);
     void handleDeleteKey();
     void handleConfirmKey();
-    void resetPinEntry();
+    void handleChangePasswordKey();
+    void handleCancelKey();
+    void handleStatusDisplayKey();
 
-    // Display
+    // PIN buffer helpers
+    void resetPinBuffer();
+    void refreshPinDisplay(bool revealLastDigit);
+    void cancelPinEntry();
+    void checkPinEntryTimeout();
+    void checkWrongPinDisplayTimeout();
+
+    // Status Display helpers
+    void enterStatusDisplay();
+    void exitStatusDisplay();
+    void checkStatusDisplayTimeout();
+
+    // State transitions
+    void confirmNewPassword();
+    void cancelPasswordChange();
+
+    // Display helpers
     void showLockedUI();
     void showUnlockedUI();
     void showWrongPinUI();
-    void showEnterPinUI();
     void showAlarmUI();
-
-    void lock();
-    void unlock();
+    void showEnterNewPinUI();
+    void showPasswordChangedUI();
 
 public:
-    SafeController(EepromLogger &logger,
+    SafeController(EepromLogger    &logger,
                    PasswordManager &passwordManager,
-                   Keypad &keypad,
-                   Screen &screen,
-                   ServoLock &servoLock,
-                   Buzzer &buzzer);
+                   Keypad          &keypad,
+                   Screen          &screen,
+                   ServoLock       &servoLock,
+                   Buzzer          &buzzer);
 
     void begin();
     void update();
 
-    void remoteLock();
-    void remoteUnlock();
+    void lock();
+    void unlock();
+    bool changePassword(const char *newPin);
 
-    bool isLocked() const;
-    SafeState getState() const;
+    void setBluetoothConnected(bool connected);
+
+    bool      isLocked()  const;
+    SafeState getState()  const;
 };

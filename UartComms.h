@@ -20,11 +20,7 @@ public:
               EepromLogger &eepromLogger,
               PasswordManager &passwordManager);
 
-    // Configures USART0 at 9600 8N1 and prints the welcome banner.
     void begin();
-
-    // Drains the receive buffer and dispatches any complete lines as commands.
-    // Call every loop() iteration.
     void update();
 
 private:
@@ -42,25 +38,17 @@ private:
     void sendLine(const char *text); // Sends text followed by "\r\n"
     void sendLine(const __FlashStringHelper *text);
     void sendUnsignedInteger(uint16_t number);
-
-    // ── Command dispatch ──────────────────────────────────────────────────────
-    // Receives a fully assembled, whitespace-trimmed line and calls the matching
-    // command handler.
     void handleCommandLine(char *commandLine);
 
-    // ── Command handlers ──────────────────────────────────────────────────────
     void handleUnlock(const char *arguments);
     void handleLock(const char *arguments);
     void handleStatus(const char *arguments);
     void handleLogs(const char *arguments);
     void handleClearLogs(const char *arguments);
+    void handleChangePassword(const char *arguments);
     void handleResetPassword(const char *arguments);
     void handleHelp(const char *arguments);
 
-    // ── Command table
-    // To add a new command: append one entry and write its handler above.
-    // Multi-word commands must appear before any shorter prefix (e.g. "clear
-    // logs" before a hypothetical "clear").
     struct Command
     {
         const char *name;                       // Lowercase command string the user types
