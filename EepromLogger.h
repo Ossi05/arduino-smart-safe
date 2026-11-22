@@ -11,6 +11,7 @@ enum class LogEventType : uint8_t
     ALARM_TRIGGERED = 0x05,
     PIN_CHANGED = 0x06,
     WATCHDOG_RESET = 0x07,
+    WATCHDOG_INTERRUPT_RESET = 0x08,
 };
 
 struct LogEvent
@@ -29,10 +30,11 @@ private:
     uint8_t readByteFromEeprom(uint16_t address) const;
 
     static constexpr uint8_t INITIALIZED_MARKER = 0xA5;
-    static constexpr uint16_t MARKER_ADDRESS = 0;      // 1 byte
-    static constexpr uint16_t NEXT_SLOT_ADDRESS = 1;   // 2 bytes
-    static constexpr uint16_t LOG_COUNT_ADDRESS = 3;   // 2 bytes
-    static constexpr uint16_t LOGS_START_ADDRESS = 16; // Bytes 5..15 left free for PIN storage
+    static constexpr uint16_t MARKER_ADDRESS = 0;           // 1 byte
+    static constexpr uint16_t NEXT_SLOT_ADDRESS = 1;        // 2 bytes
+    static constexpr uint16_t LOG_COUNT_ADDRESS = 3;        // 2 bytes
+    static constexpr uint16_t WATCHDOG_MARKER_ADDRESS = 10; // Reserved in bytes 5..15 for Watchdog emergency marker
+    static constexpr uint16_t LOGS_START_ADDRESS = 16;      // Bytes 5..15 left free for PIN and marker storage
 
     uint16_t nextWriteSlot = 0;
     uint16_t storedLogCount = 0;

@@ -50,7 +50,11 @@ void SafeController::begin()
     showLockedUI();
 
     // 3. Log watchdog reboot error if detected, followed by system boot
-    if (watchdogManager.wasResetByWatchdog())
+    if (watchdogManager.wasWatchdogInterruptTriggered())
+    {
+        logger.logEvent(LogEventType::WATCHDOG_INTERRUPT_RESET);
+    }
+    else if (watchdogManager.wasResetByWatchdog())
     {
         logger.logEvent(LogEventType::WATCHDOG_RESET);
     }
@@ -59,7 +63,6 @@ void SafeController::begin()
 
 void SafeController::update()
 {
-    // 1. Reset watchdog timer to maintain active execution heartbeat
     watchdogManager.resetWatchdog();
 
     // 2. Update hardware components
