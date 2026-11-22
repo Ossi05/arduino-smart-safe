@@ -22,13 +22,10 @@
 #include "UartComms.h"
 #include "WatchdogManager.h"
 
-static const byte KEYPAD_ROW_PINS[4] = {4, 5, 6, 7};
-static const byte KEYPAD_COLUMN_PINS[4] = {8, 9, 10, 11};
-
 WatchdogManager watchdogManager;
 EepromLogger logger;
 PasswordManager passwordManager;
-Keypad keypad(KEYPAD_ROW_PINS, KEYPAD_COLUMN_PINS);
+Keypad keypad;
 Screen screen;
 ServoLock servoLock;
 Buzzer buzzer;

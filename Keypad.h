@@ -1,33 +1,38 @@
-﻿#pragma once
+#pragma once
 #include <Arduino.h>
+#include <avr/io.h>
 
 class Keypad {
 private:
-    static constexpr byte ROW_COUNT = 4;
-    static constexpr byte COLUMN_COUNT = 4;
-    static constexpr byte DEBOUNCE_SAMPLES = 4; // 4 * 5ms = 20ms
-    static constexpr byte QUEUE_CAPACITY = 16;
+    static constexpr uint8_t ROW_COUNT = 4;
+    static constexpr uint8_t COLUMN_COUNT = 4;
+    static constexpr uint8_t DEBOUNCE_SAMPLES = 4;
+    static constexpr uint8_t QUEUE_CAPACITY = 16;
+
+    static constexpr uint8_t ROW_START_BIT = PD4;
+    static constexpr uint8_t COLUMN_START_BIT = PB0;
+    static constexpr uint8_t ROW_PIN_MASK = (1 << PD4) | (1 << PD5) | (1 << PD6) | (1 << PD7);
+    static constexpr uint8_t COLUMN_PIN_MASK = (1 << PB0) | (1 << PB1) | (1 << PB2) | (1 << PB3);
 
     static Keypad* instance;
 
-    byte rowPins[ROW_COUNT];
-    byte columnPins[COLUMN_COUNT];
     char keyLayoutGrid[ROW_COUNT][COLUMN_COUNT];
 
     char previousScannedKey;
     char previouslyActiveKey;
-    byte stableReadingCount;
+    uint8_t stableReadingCount;
 
     volatile char keyPressQueueArray[QUEUE_CAPACITY];
-    volatile byte queueWriteIndex;
-    volatile byte queueReadIndex;
+    volatile uint8_t queueWriteIndex;
+    volatile uint8_t queueReadIndex;
 
     char getCurrentlyPressedKey();
     void enqueueKey(char key);
     void setupTimer1();
 
 public:
-    Keypad(const byte rows[ROW_COUNT], const byte columns[COLUMN_COUNT]);
+    Keypad();
+    Keypad(const uint8_t rowPins[ROW_COUNT], const uint8_t columnPins[COLUMN_COUNT]);
 
     bool begin();
     bool hasQueuedKey() const;

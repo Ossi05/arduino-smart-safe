@@ -9,29 +9,24 @@ static constexpr char DEFAULT_KEY_LAYOUT[4][4] = {
     {'*', '0', '#', 'D'}
 };
 
-Keypad::Keypad(const byte rows[ROW_COUNT], const byte columns[COLUMN_COUNT])
+Keypad::Keypad()
     : previousScannedKey('\0'),
       previouslyActiveKey('\0'),
       stableReadingCount(0),
       queueWriteIndex(0),
       queueReadIndex(0) {
-    
-    // 1. Initialize row pin array
-    for (byte row = 0; row < ROW_COUNT; row++) {
-        rowPins[row] = rows[row];
-    }
-
-    // 2. Initialize column pin array
-    for (byte column = 0; column < COLUMN_COUNT; column++) {
-        columnPins[column] = columns[column];
-    }
-
-    // 3. Create the key layout grid
-    for (byte row = 0; row < ROW_COUNT; row++) {
-        for (byte column = 0; column < COLUMN_COUNT; column++) {
+    // 1. Initialize the key layout grid
+    for (uint8_t row = 0; row < ROW_COUNT; row++) {
+        for (uint8_t column = 0; column < COLUMN_COUNT; column++) {
             keyLayoutGrid[row][column] = DEFAULT_KEY_LAYOUT[row][column];
         }
     }
+}
+
+Keypad::Keypad(const uint8_t rowPins[ROW_COUNT], const uint8_t columnPins[COLUMN_COUNT])
+    : Keypad() {
+    (void)rowPins;
+    (void)columnPins;
 }
 
 bool Keypad::begin() {
@@ -42,64 +37,75 @@ bool Keypad::begin() {
     }
     instance = this;
 
-    // 2. Set row pins as OUTPUT and initialize them HIGH
-    for (byte row = 0; row < ROW_COUNT; row++) {
-        pinMode(rowPins[row], OUTPUT);
-        digitalWrite(rowPins[row], HIGH);
-    }
-    
-    // 3. Set column pins as INPUT_PULLUP
-    for (byte column = 0; column < COLUMN_COUNT; column++) {
-        pinMode(columnPins[column], INPUT_PULLUP);
-    }
+    // 2. Configure row pins (PD4-PD7) as outputs and initialize them to HIGH
+    DDRD |= ROW_PIN_MASK;
+    PORTD |= ROW_PIN_MASK;
 
-    // 4. Setup Timer1 for checking keypresses
+    // 3. Configure column pins (PB0-PB3) as inputs and enable internal pull-up resistors
+    DDRB &= ~COLUMN_PIN_MASK;
+    PORTB |= COLUMN_PIN_MASK;
+
+    // 4. Setup Timer 1 for non-blocking debounced matrix scanning
     setupTimer1();
     return true;
 }
 
 void Keypad::setupTimer1() {
+    // 1. Temporarily disable interrupts while configuring Timer 1
     noInterrupts();
 
+    // 2. Reset Timer 1 control and count registers
     TCCR1A = 0;
     TCCR1B = 0;
     TCNT1 = 0;
 
-    // 5ms interval
+    // 3. Configure CTC mode with a 64 prescaler for 5ms intervals (16MHz / (64 * 200Hz) - 1 = 1249)
     OCR1A = 1249;
-    TCCR1B |= (1 << WGM12);              // CTC mode
-    TCCR1B |= (1 << CS11) | (1 << CS10); // Prescaler 64
-    TIMSK1 |= (1 << OCIE1A);             // Enable Compare Match A interrupt
+    TCCR1B |= (1 << WGM12);
+    TCCR1B |= (1 << CS11) | (1 << CS10);
+    TIMSK1 |= (1 << OCIE1A);
 
+    // 4. Re-enable interrupts
     interrupts();
 }
 
 char Keypad::getCurrentlyPressedKey() {
-     // 1. Loop through rows
-    for (byte row = 0; row < ROW_COUNT; row++) {
-        digitalWrite(rowPins[row], LOW); // Activate the current row
+    char pressedKey = '\0';
 
-        // 2. Check each column for a LOW signal indicating a key press
-        for (byte column = 0; column < COLUMN_COUNT; column++) {
+    // 1. Scan rows sequentially
+    for (uint8_t rowIndex = 0; rowIndex < ROW_COUNT; rowIndex++) {
+        // Drive current row LOW while keeping inactive rows HIGH
+        PORTD = (PORTD | ROW_PIN_MASK) & ~(1 << (ROW_START_BIT + rowIndex));
 
-            bool isKeyPressed = digitalRead(columnPins[column]) == LOW;
-            if (isKeyPressed) {
-                digitalWrite(rowPins[row], HIGH); // Reset the row back to HIGH
-                char pressedKey = keyLayoutGrid[row][column];
-                return pressedKey;
+        // Settling delay for pull-up voltage stabilization
+        __asm__ __volatile__ ("nop\n\t" "nop\n\t");
+
+        // 2. Read column states in a single register read operation
+        uint8_t columnPinStates = PINB & COLUMN_PIN_MASK;
+
+        // 3. Check if any column is pulled LOW by a pressed key
+        if (columnPinStates != COLUMN_PIN_MASK) {
+            for (uint8_t columnIndex = 0; columnIndex < COLUMN_COUNT; columnIndex++) {
+                if ((columnPinStates & (1 << (COLUMN_START_BIT + columnIndex))) == 0) {
+                    pressedKey = keyLayoutGrid[rowIndex][columnIndex];
+                    break;
+                }
             }
+            break;
         }
-
-        digitalWrite(rowPins[row], HIGH); // No key press was found, reset the row back to HIGH
     }
 
-    // No key is pressed
-    return '\0';
+    // 4. Restore all row pins to HIGH at the end of the scan cycle
+    PORTD |= ROW_PIN_MASK;
+
+    return pressedKey;
 }
 
 void Keypad::enqueueKey(char key) {
-    byte nextWriteIndex = (queueWriteIndex + 1) % QUEUE_CAPACITY; 
+    // 1. Calculate the next circular buffer write index
+    uint8_t nextWriteIndex = (queueWriteIndex + 1) % QUEUE_CAPACITY;
 
+    // 2. Store key if queue is not full
     if (nextWriteIndex != queueReadIndex) {
         keyPressQueueArray[queueWriteIndex] = key;
         queueWriteIndex = nextWriteIndex;
@@ -107,23 +113,22 @@ void Keypad::enqueueKey(char key) {
 }
 
 void Keypad::handleTimerInterrupt() {
-    // Check if a keypad instance exists
+    // 1. Verify singleton instance exists
     if (instance == nullptr) {
         return;
     }
 
-    // 2. Get currently pressed key
+    // 2. Scan matrix for currently pressed key
     char pressedKey = instance->getCurrentlyPressedKey();
 
-    // 3. Check if the currently pressed key is the same as the previously scanned key
+    // 3. Process debounce state machine
     if (pressedKey == instance->previousScannedKey) {
-        if (instance->stableReadingCount < DEBOUNCE_SAMPLES) { // If the stable reading count is less than the required debounce samples
+        if (instance->stableReadingCount < DEBOUNCE_SAMPLES) {
             instance->stableReadingCount++;
-        } 
-        else if (pressedKey != instance->previouslyActiveKey) { // If the key is different than the previously active key
+        } else if (pressedKey != instance->previouslyActiveKey) {
             instance->previouslyActiveKey = pressedKey;
 
-            if (pressedKey != '\0') { // If the pressed key is not the null character, enqueue it
+            if (pressedKey != '\0') {
                 instance->enqueueKey(pressedKey);
             }
         }
@@ -138,12 +143,14 @@ bool Keypad::hasQueuedKey() const {
 }
 
 char Keypad::getNextQueuedKey() {
+    // 1. Guard against reading from an empty queue with interrupts disabled
     noInterrupts();
     if (queueReadIndex == queueWriteIndex) {
         interrupts();
         return '\0';
     }
 
+    // 2. Retrieve next key and advance read index atomically
     char nextKey = keyPressQueueArray[queueReadIndex];
     queueReadIndex = (queueReadIndex + 1) % QUEUE_CAPACITY;
     interrupts();
