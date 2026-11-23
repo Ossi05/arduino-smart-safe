@@ -3,9 +3,9 @@
 #include <HardwareSerial.h>
 #include <stdint.h>
 
-#include "SafeController.h"
-#include "EepromLogger.h"
-#include "PasswordManager.h"
+#include "../SafeController.h"
+#include "../storage/EepromLogger.h"
+#include "../storage/PasswordManager.h"
 
 /*
  * Handles all UART communication for the smart safe.

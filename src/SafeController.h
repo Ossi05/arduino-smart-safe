@@ -1,15 +1,15 @@
 #pragma once
 #include <Arduino.h>
 
-#include "Buzzer.h"
-#include "EepromLogger.h"
-#include "Keypad.h"
-#include "Led.h"
-#include "PasswordManager.h"
-#include "Screen.h"
-#include "ServoLock.h"
-#include "StatusDisplay.h"
-#include "WatchdogManager.h"
+#include "hardware/Buzzer.h"
+#include "storage/EepromLogger.h"
+#include "hardware/Keypad.h"
+#include "hardware/Led.h"
+#include "storage/PasswordManager.h"
+#include "hardware/Screen.h"
+#include "hardware/ServoLock.h"
+#include "hardware/StatusDisplay.h"
+#include "system/WatchdogManager.h"
 
 //  0-9 -> PIN digits
 //   * -> delete last digit (backspace); cancels password change when buffer is empty

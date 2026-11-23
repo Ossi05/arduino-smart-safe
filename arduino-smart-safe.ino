@@ -11,16 +11,16 @@
 
 #include <Wire.h>
 #include <avr/io.h>
-#include "Buzzer.h"
-#include "EepromLogger.h"
-#include "Keypad.h"
-#include "Led.h"
-#include "PasswordManager.h"
-#include "SafeController.h"
-#include "Screen.h"
-#include "ServoLock.h"
-#include "UartComms.h"
-#include "WatchdogManager.h"
+#include "src/hardware/Buzzer.h"
+#include "src/storage/EepromLogger.h"
+#include "src/hardware/Keypad.h"
+#include "src/hardware/Led.h"
+#include "src/storage/PasswordManager.h"
+#include "src/SafeController.h"
+#include "src/hardware/Screen.h"
+#include "src/hardware/ServoLock.h"
+#include "src/system/UartComms.h"
+#include "src/system/WatchdogManager.h"
 
 WatchdogManager watchdogManager;
 EepromLogger logger;

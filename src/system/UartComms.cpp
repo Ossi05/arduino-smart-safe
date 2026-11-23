@@ -1,6 +1,7 @@
-#include "UartComms.h"
 #include <string.h>
 #include <ctype.h>
+
+#include "UartComms.h"
 
 // Serial owns the USART0 interrupt and receive buffer through HardwareSerial.
 static constexpr uint32_t BAUD_RATE = 9600UL;
