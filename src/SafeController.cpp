@@ -30,7 +30,7 @@ SafeController::SafeController(WatchdogManager &watchdogManager,
       isBluetoothScreenActive(false),
       isBluetoothMessageTimed(false),
       bluetoothMessageStartTimeMs(0),
-      displayedPairingSeconds(NO_PAIRING_SECONDS_DISPLAYED)
+      displayedAddDeviceSeconds(NO_PAIRING_SECONDS_DISPLAYED)
 {
     // Zero-initialise the PIN buffer so it is always null-terminated.
     for (uint8_t i = 0; i <= MAX_PIN_LENGTH; i++)
@@ -118,7 +118,7 @@ void SafeController::lock()
     isBluetoothScreenActive = false;
     if (bleComms != nullptr)
     {
-        bleComms->cancelPairingWindow();
+        bleComms->cancelAddDeviceWindow();
     }
     failedAttemptCount = 0;
 
@@ -188,7 +188,7 @@ void SafeController::handleKeypadInput()
             handleCancelKey();
             break;
         case 'B':
-            handleBluetoothPairingKey();
+            handleBluetoothAddDeviceKey();
             break;
         default:
             if (key >= '0' && key <= '9')
@@ -595,27 +595,24 @@ void SafeController::showPasswordChangedUI()
 
 
 
-void SafeController::handleBluetoothPairingKey()
+void SafeController::handleBluetoothAddDeviceKey()
 {
     if (bleComms == nullptr)
     {
         return;
     }
 
-    // 1. Locked: refuse and tell the user why.
+    // 1. Refuse if locked and explain to user
     if (state != SafeState::UNLOCKED)
     {
         resetPinBuffer();
-        showUnlockToPairUI();
+        showUnlockToAddBtUI();
         wrongPinDisplayStartTimeMs = millis();
         return;
     }
 
-    // 2. Unlocked: drop the current device and open a new 60-second pairing window
-    if (state == SafeState::UNLOCKED)
-    {
-        bleComms->startNewPairingWindow();
-    }
+    // 2. Unlocked: start 60-second window to add a new device
+    bleComms->startAddDeviceWindow();
 }
 
 void SafeController::updateBluetoothDisplay()
@@ -627,11 +624,11 @@ void SafeController::updateBluetoothDisplay()
 
     // 1. Mirror connection events on the status page
     BleEvent event = bleComms->consumePendingEvent();
-    if (event == BleEvent::PAIRING_STARTED || event == BleEvent::DEVICE_DISCONNECTED)
+    if (event == BleEvent::ADD_DEVICE_STARTED || event == BleEvent::DEVICE_DISCONNECTED)
     {
         statusDisplay.setBluetoothConnected(false);
     }
-    else if (event == BleEvent::DEVICE_CONNECTED)
+    else if (event == BleEvent::DEVICE_CONNECTED || event == BleEvent::DEVICE_ADDED)
     {
         statusDisplay.setBluetoothConnected(true);
     }
@@ -645,10 +642,14 @@ void SafeController::updateBluetoothDisplay()
 
     switch (event)
     {
-    case BleEvent::PAIRING_STARTED:
+    case BleEvent::ADD_DEVICE_STARTED:
         isBluetoothScreenActive = true;
         isBluetoothMessageTimed = false;
-        displayedPairingSeconds = NO_PAIRING_SECONDS_DISPLAYED;
+        displayedAddDeviceSeconds = NO_PAIRING_SECONDS_DISPLAYED;
+        showAddDeviceUI(60);
+        break;
+    case BleEvent::DEVICE_ADDED:
+        startTimedBluetoothMessage("BT Device Added");
         break;
     case BleEvent::DEVICE_CONNECTED:
         startTimedBluetoothMessage("BT Connected");
@@ -656,22 +657,22 @@ void SafeController::updateBluetoothDisplay()
     case BleEvent::DEVICE_DISCONNECTED:
         startTimedBluetoothMessage("BT Disconnected");
         break;
-    case BleEvent::PAIRING_TIMED_OUT:
-        startTimedBluetoothMessage("BT Pair timeout");
+    case BleEvent::ADD_DEVICE_TIMED_OUT:
+        startTimedBluetoothMessage("BT Add timeout");
         break;
     case BleEvent::NONE:
     default:
         break;
     }
 
-    // 3. Refresh the pairing countdown once per second
-    if (isBluetoothScreenActive && !isBluetoothMessageTimed && bleComms->isPairingWindowOpen())
+    // 3. Refresh the add-device countdown once per second
+    if (isBluetoothScreenActive && !isBluetoothMessageTimed && bleComms->isAddingNewDeviceMode())
     {
-        uint8_t remainingSeconds = bleComms->getRemainingPairingSeconds();
-        if (remainingSeconds != displayedPairingSeconds)
+        uint8_t remainingSeconds = bleComms->getRemainingAddDeviceSeconds();
+        if (remainingSeconds != displayedAddDeviceSeconds)
         {
-            displayedPairingSeconds = remainingSeconds;
-            showBluetoothPairingUI(remainingSeconds);
+            displayedAddDeviceSeconds = remainingSeconds;
+            showAddDeviceUI(remainingSeconds);
         }
     }
 
@@ -692,17 +693,17 @@ void SafeController::startTimedBluetoothMessage(const char *message)
     screen.print(message, 0);
 }
 
-void SafeController::showUnlockToPairUI()
+void SafeController::showUnlockToAddBtUI()
 {
     screen.clear();
-    screen.print(F("Unlock to pair"), 0);
+    screen.print(F("Unlock to add BT"), 0);
     screen.setStatusIcon(0, SafeIcon::BLUETOOTH);
     screen.setStatusText(F("Bluetooth"));
 }
 
-void SafeController::showBluetoothPairingUI(uint8_t remainingSeconds)
+void SafeController::showAddDeviceUI(uint8_t remainingSeconds)
 {
-    char pairingLine[17];
-    snprintf(pairingLine, sizeof(pairingLine), "BT Pairing: %us", static_cast<unsigned>(remainingSeconds));
-    screen.print(pairingLine, 0);
+    char addDeviceLine[17];
+    snprintf(addDeviceLine, sizeof(addDeviceLine), "Add BT Device: %us", static_cast<unsigned>(remainingSeconds));
+    screen.print(addDeviceLine, 0);
 }

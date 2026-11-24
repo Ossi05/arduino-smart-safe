@@ -38,7 +38,7 @@ Led greenLed(getNanoGpioPin(NanoPin::DIGITAL_13));
 
 SafeController safeController(watchdogManager, logger, passwordManager, keypad, screen, servoLock, buzzer, redLed, greenLed);
 UartComms uartComms(safeController, logger, passwordManager);
-BleComms bleComms(safeController, logger, passwordManager);
+BleComms bleComms(safeController, logger, passwordManager, &screen);
 
 void setup()
 {
@@ -65,7 +65,7 @@ void setup()
     // 7. Initialise serial communication
     uartComms.begin();
 
-    // 8. Start BLE with advertising off until 'B' is pressed while unlocked
+    // 8. Start BLE (advertising enabled if trusted devices exist; otherwise waiting for 'B')
     bleComms.begin();
 
     // 9. Configure and arm NRF_WDT with a 2-second timeout

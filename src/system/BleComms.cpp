@@ -4,50 +4,62 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "../SafeController.h"
+#include "../hardware/Screen.h"
+
 const BleComms::Command BleComms::commands[] =
-    {
-        {"unlock", "Unlock the safe", &BleComms::handleUnlockCommand},
-        {"lock", "Lock the safe", &BleComms::handleLockCommand},
-        {"status", "Report lock state", &BleComms::handleStatusCommand},
-        {"logs", "Print stored logs", &BleComms::handleLogsCommand},
-        {"clear logs", "Erase stored logs", &BleComms::handleClearLogsCommand},
-        {"reset password", "Reset PIN, or: reset password 1234", &BleComms::handleResetPasswordCommand},
-        {"help", "List commands", &BleComms::handleHelpCommand},
+{
+    {"unlock", "Unlock the safe", &BleComms::handleUnlockCommand},
+    {"lock", "Lock the safe", &BleComms::handleLockCommand},
+    {"status", "Report lock state", &BleComms::handleStatusCommand},
+    {"logs", "Print stored logs", &BleComms::handleLogsCommand},
+    {"clear logs", "Erase stored logs", &BleComms::handleClearLogsCommand},
+    {"reset password", "Reset PIN, or: reset password 1234", &BleComms::handleResetPasswordCommand},
+    {"clear bt", "Wipe all saved Bluetooth devices", &BleComms::handleClearBtCommand},
+    {"help", "List commands", &BleComms::handleHelpCommand},
 };
 
 const uint8_t BleComms::commandCount = sizeof(BleComms::commands) / sizeof(BleComms::commands[0]);
 
 BleComms::BleComms(SafeController &safeController,
                    EepromLogger &eepromLogger,
-                   PasswordManager &passwordManager)
-    :     nordicUartService(serviceUuid),
-    commandWriteCharacteristic(commandWriteUuid, BLEWrite | BLEWriteWithoutResponse, maxPacketSize),
-    responseNotifyCharacteristic(responseNotifyUuid, BLENotify, maxPacketSize),
+                   PasswordManager &passwordManager,
+                   Screen *screen)
+    : nordicUartService(serviceUuid),
+      commandWriteCharacteristic(commandWriteUuid, BLEWrite | BLEWriteWithoutResponse, maxPacketSize),
+      responseNotifyCharacteristic(responseNotifyUuid, BLENotify, maxPacketSize),
       safeController(safeController),
       eepromLogger(eepromLogger),
       passwordManager(passwordManager),
+      screen(screen),
+      trustedDeviceCount(0),
       isBleStarted(false),
       isAdvertisingActive(false),
       isDeviceConnected(false),
-      pairingWindowStartMs(0),
+      isAddingNewDevice(false),
+      addDeviceWindowStartMs(0),
       lastNotifyTimeMs(0),
       pendingEvent(BleEvent::NONE),
       transmitReadIndex(0),
       transmitWriteIndex(0),
       queuedByteCount(0)
 {
+    for (uint8_t i = 0; i < maxTrustedDevices; i++)
+    {
+        trustedDeviceAddresses[i][0] = '\0';
+    }
 }
 
 bool BleComms::begin()
 {
-    // 1. Start the BLE stack
+    // 1. Initialise the BLE hardware stack
     if (!BLE.begin())
     {
         isBleStarted = false;
         return false;
     }
 
-    // 2. Publish the device name and the Nordic UART Service
+    // 2. Publish device name and Nordic UART Service
     BLE.setLocalName(localName);
     BLE.setDeviceName(localName);
     BLE.setAdvertisedService(nordicUartService);
@@ -55,8 +67,21 @@ bool BleComms::begin()
     nordicUartService.addCharacteristic(responseNotifyCharacteristic);
     BLE.addService(nordicUartService);
 
-    // 3. Stay invisible until a pairing window is requested
-    stopAdvertising();
+    // 3. Load saved trusted MAC addresses from non-volatile Flash
+    loadTrustedDevices();
+
+    // 4. Start advertising if trusted devices exist; otherwise stay invisible
+    if (trustedDeviceCount > 0)
+    {
+        BLE.advertise();
+        isAdvertisingActive = true;
+    }
+    else
+    {
+        BLE.stopAdvertise();
+        isAdvertisingActive = false;
+    }
+
     isBleStarted = true;
     return true;
 }
@@ -71,21 +96,21 @@ void BleComms::update()
     // 1. Process BLE stack events without blocking
     BLE.poll();
 
-    // 2. Track connection state, pairing timeout, incoming commands and outgoing responses
+    // 2. Track connection state, add-device timeout, incoming commands, and outgoing responses
     updateConnectionState();
-    checkPairingWindowTimeout();
+    checkAddDeviceWindowTimeout();
     readIncomingCommand();
     transmitNextChunk();
 }
 
-void BleComms::startNewPairingWindow()
+void BleComms::startAddDeviceWindow()
 {
     if (!isBleStarted)
     {
         return;
     }
 
-    // 1. Drop the current device before opening a new window.
+    // 1. Disconnect any currently connected device so the new device can connect
     BLEDevice central = BLE.central();
     if (central && central.connected())
     {
@@ -94,22 +119,58 @@ void BleComms::startNewPairingWindow()
     isDeviceConnected = false;
     clearTransmitBuffer();
 
-    // 2. Open the discoverable window and start the 60-second timeout.
+    // 2. Enable add-device mode for 60 seconds and start advertising
+    isAddingNewDevice = true;
+    addDeviceWindowStartMs = millis();
     BLE.stopAdvertise();
     BLE.advertise();
     isAdvertisingActive = true;
-    pairingWindowStartMs = millis();
-    pendingEvent = BleEvent::PAIRING_STARTED;
+
+    // 3. Notify screen and queue event
+    pendingEvent = BleEvent::ADD_DEVICE_STARTED;
+    if (screen != nullptr)
+    {
+        screen->print("Add BT Device: 60s", 0);
+    }
 }
 
-void BleComms::cancelPairingWindow()
+void BleComms::cancelAddDeviceWindow()
 {
-    stopAdvertising();
+    isAddingNewDevice = false;
+    addDeviceWindowStartMs = 0;
+
+    // Stop advertising if no trusted devices are saved and no central is connected
+    if (trustedDeviceCount == 0 && !isDeviceConnected)
+    {
+        stopAdvertising();
+    }
 }
 
-bool BleComms::isPairingWindowOpen() const
+void BleComms::clearTrustedDevices()
 {
-    return isAdvertisingActive;
+    // 1. Remove individual device keys from KVStore
+    for (uint8_t deviceIndex = 0; deviceIndex < maxTrustedDevices; deviceIndex++)
+    {
+        char storageKey[16];
+        snprintf(storageKey, sizeof(storageKey), "%s%u", kvDeviceKeyPrefix, deviceIndex);
+        kv_remove(storageKey);
+        trustedDeviceAddresses[deviceIndex][0] = '\0';
+    }
+
+    // 2. Reset device count in memory and Flash
+    trustedDeviceCount = 0;
+    kv_set(kvDeviceCountKey, &trustedDeviceCount, sizeof(trustedDeviceCount), 0);
+
+    // 3. Stop advertising if not connected and not currently adding a device
+    if (!isDeviceConnected && !isAddingNewDevice)
+    {
+        stopAdvertising();
+    }
+}
+
+bool BleComms::isAddingNewDeviceMode() const
+{
+    return isAddingNewDevice;
 }
 
 bool BleComms::isCentralConnected() const
@@ -117,15 +178,20 @@ bool BleComms::isCentralConnected() const
     return isDeviceConnected;
 }
 
-uint8_t BleComms::getRemainingPairingSeconds() const
+uint8_t BleComms::getRemainingAddDeviceSeconds() const
 {
-    unsigned long elapsedMs = millis() - pairingWindowStartMs;
-    if (!isAdvertisingActive || elapsedMs >= pairingWindowDurationMs)
+    unsigned long elapsedMs = millis() - addDeviceWindowStartMs;
+    if (!isAddingNewDevice || elapsedMs >= addDeviceWindowDurationMs)
     {
         return 0;
     }
 
-    return static_cast<uint8_t>((pairingWindowDurationMs - elapsedMs + 999UL) / 1000UL);
+    return static_cast<uint8_t>((addDeviceWindowDurationMs - elapsedMs + 999UL) / 1000UL);
+}
+
+uint8_t BleComms::getTrustedDeviceCount() const
+{
+    return trustedDeviceCount;
 }
 
 BleEvent BleComms::consumePendingEvent()
@@ -135,14 +201,147 @@ BleEvent BleComms::consumePendingEvent()
     return event;
 }
 
+void BleComms::loadTrustedDevices()
+{
+    // 1. Retrieve stored device count
+    size_t actualByteCount = 0;
+    uint8_t storedCount = 0;
+    int status = kv_get(kvDeviceCountKey, &storedCount, sizeof(storedCount), &actualByteCount);
+
+    if (status != MBED_SUCCESS || storedCount > maxTrustedDevices)
+    {
+        trustedDeviceCount = 0;
+        return;
+    }
+
+    // 2. Read each saved MAC address
+    trustedDeviceCount = 0;
+    for (uint8_t deviceIndex = 0; deviceIndex < storedCount; deviceIndex++)
+    {
+        char storageKey[16];
+        snprintf(storageKey, sizeof(storageKey), "%s%u", kvDeviceKeyPrefix, deviceIndex);
+
+        char addressBuffer[macAddressLength];
+        status = kv_get(storageKey, addressBuffer, sizeof(addressBuffer), &actualByteCount);
+
+        if (status == MBED_SUCCESS && actualByteCount > 0)
+        {
+            addressBuffer[sizeof(addressBuffer) - 1] = '\0';
+            strncpy(trustedDeviceAddresses[trustedDeviceCount], addressBuffer, macAddressLength);
+            trustedDeviceAddresses[trustedDeviceCount][macAddressLength - 1] = '\0';
+            trustedDeviceCount++;
+        }
+    }
+}
+
+bool BleComms::saveTrustedDevice(const char *deviceAddress)
+{
+    if (deviceAddress == nullptr || deviceAddress[0] == '\0')
+    {
+        return false;
+    }
+
+    // 1. Skip if already authorized
+    if (isDeviceTrusted(deviceAddress))
+    {
+        return true;
+    }
+
+    // 2. If allowlist is full, shift left to evict oldest device
+    uint8_t insertIndex = trustedDeviceCount;
+    if (trustedDeviceCount >= maxTrustedDevices)
+    {
+        for (uint8_t deviceIndex = 0; deviceIndex < maxTrustedDevices - 1; deviceIndex++)
+        {
+            strncpy(trustedDeviceAddresses[deviceIndex], trustedDeviceAddresses[deviceIndex + 1], macAddressLength);
+            char storageKey[16];
+            snprintf(storageKey, sizeof(storageKey), "%s%u", kvDeviceKeyPrefix, deviceIndex);
+            kv_set(storageKey, trustedDeviceAddresses[deviceIndex], strlen(trustedDeviceAddresses[deviceIndex]) + 1, 0);
+        }
+        insertIndex = maxTrustedDevices - 1;
+        trustedDeviceCount = maxTrustedDevices;
+    }
+    else
+    {
+        trustedDeviceCount++;
+    }
+
+    // 3. Store new MAC address at insertIndex
+    strncpy(trustedDeviceAddresses[insertIndex], deviceAddress, macAddressLength);
+    trustedDeviceAddresses[insertIndex][macAddressLength - 1] = '\0';
+
+    char targetKey[16];
+    snprintf(targetKey, sizeof(targetKey), "%s%u", kvDeviceKeyPrefix, insertIndex);
+    kv_set(targetKey, trustedDeviceAddresses[insertIndex], strlen(trustedDeviceAddresses[insertIndex]) + 1, 0);
+
+    // 4. Update stored device count
+    kv_set(kvDeviceCountKey, &trustedDeviceCount, sizeof(trustedDeviceCount), 0);
+    return true;
+}
+
+bool BleComms::isDeviceTrusted(const char *deviceAddress) const
+{
+    if (deviceAddress == nullptr)
+    {
+        return false;
+    }
+
+    for (uint8_t deviceIndex = 0; deviceIndex < trustedDeviceCount; deviceIndex++)
+    {
+        if (strcasecmp(trustedDeviceAddresses[deviceIndex], deviceAddress) == 0)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 void BleComms::updateConnectionState()
 {
     BLEDevice central = BLE.central();
-    bool isCentralStillConnected = central && central.connected();
+    bool isCentralCurrentlyConnected = central && central.connected();
 
-    // 1. New device connected: close the window so nobody else can connect.
-    if (isCentralStillConnected && !isDeviceConnected)
+    // 1. Handle newly connected central device
+    if (isCentralCurrentlyConnected && !isDeviceConnected)
     {
+        String centralAddressString = central.address();
+        const char *centralAddress = centralAddressString.c_str();
+
+        // 1a. In add-device mode, save and authorize this device
+        if (isAddingNewDevice)
+        {
+            saveTrustedDevice(centralAddress);
+            isAddingNewDevice = false;
+            addDeviceWindowStartMs = 0;
+            isDeviceConnected = true;
+
+            stopAdvertising();
+            clearTransmitBuffer();
+            pendingEvent = BleEvent::DEVICE_ADDED;
+
+            if (screen != nullptr)
+            {
+                screen->print("BT Device Added", 0);
+            }
+            return;
+        }
+
+        // 1b. In normal mode, reject unauthorized devices immediately
+        if (!isDeviceTrusted(centralAddress))
+        {
+            central.disconnect();
+
+            // Resume advertising for authorized devices if applicable
+            if (trustedDeviceCount > 0 && !isAdvertisingActive)
+            {
+                BLE.advertise();
+                isAdvertisingActive = true;
+            }
+            return;
+        }
+
+        // 1c. Authorized central device accepted
         isDeviceConnected = true;
         stopAdvertising();
         clearTransmitBuffer();
@@ -150,27 +349,44 @@ void BleComms::updateConnectionState()
         return;
     }
 
-    // 2. Device disconnected: remain non-discoverable until 'B' opens another window.
-    if (!isCentralStillConnected && isDeviceConnected)
+    // 2. Handle disconnected central device
+    if (!isCentralCurrentlyConnected && isDeviceConnected)
     {
         isDeviceConnected = false;
         clearTransmitBuffer();
-        stopAdvertising();
         pendingEvent = BleEvent::DEVICE_DISCONNECTED;
+
+        // Resume advertising if trusted devices exist or add-device mode is active
+        if (trustedDeviceCount > 0 || isAddingNewDevice)
+        {
+            BLE.advertise();
+            isAdvertisingActive = true;
+        }
+        else
+        {
+            stopAdvertising();
+        }
     }
 }
 
-void BleComms::checkPairingWindowTimeout()
+void BleComms::checkAddDeviceWindowTimeout()
 {
-    if (!isAdvertisingActive)
+    if (!isAddingNewDevice)
     {
         return;
     }
 
-    if (millis() - pairingWindowStartMs >= pairingWindowDurationMs)
+    if (millis() - addDeviceWindowStartMs >= addDeviceWindowDurationMs)
     {
-        stopAdvertising();
-        pendingEvent = BleEvent::PAIRING_TIMED_OUT;
+        isAddingNewDevice = false;
+        addDeviceWindowStartMs = 0;
+        pendingEvent = BleEvent::ADD_DEVICE_TIMED_OUT;
+
+        // Stop advertising if no trusted devices are saved
+        if (trustedDeviceCount == 0 && !isDeviceConnected)
+        {
+            stopAdvertising();
+        }
     }
 }
 
@@ -181,7 +397,7 @@ void BleComms::readIncomingCommand()
         return;
     }
 
-    // 1. Every command fits in one 20-byte packet, so one write is one command line
+    // 1. Copy command packet from characteristic
     uint8_t receivedBytes[maxPacketSize + 1];
     int receivedLength = commandWriteCharacteristic.valueLength();
     if (receivedLength <= 0)
@@ -195,7 +411,7 @@ void BleComms::readIncomingCommand()
     commandWriteCharacteristic.readValue(receivedBytes, receivedLength);
     receivedBytes[receivedLength] = '\0';
 
-    // 2. Trim and dispatch non-empty command lines
+    // 2. Trim and dispatch non-empty command line
     char *trimmedCommandLine = trimWhitespace(reinterpret_cast<char *>(receivedBytes));
     if (trimmedCommandLine[0] != '\0')
     {
@@ -215,7 +431,7 @@ void BleComms::transmitNextChunk()
         return;
     }
 
-    // 1. Copy up to one packet out of the ring buffer
+    // 1. Copy up to 20 bytes from ring buffer
     uint8_t chunkLength = (queuedByteCount < maxPacketSize) ? static_cast<uint8_t>(queuedByteCount) : maxPacketSize;
     uint8_t chunkBytes[maxPacketSize];
     for (uint8_t byteIndex = 0; byteIndex < chunkLength; byteIndex++)
@@ -225,7 +441,7 @@ void BleComms::transmitNextChunk()
     }
     queuedByteCount -= chunkLength;
 
-    // 2. Notify the connected device
+    // 2. Send chunk via notify characteristic
     responseNotifyCharacteristic.writeValue(chunkBytes, chunkLength);
     lastNotifyTimeMs = millis();
 }
@@ -234,7 +450,8 @@ void BleComms::stopAdvertising()
 {
     BLE.stopAdvertise();
     isAdvertisingActive = false;
-    pairingWindowStartMs = 0;
+    isAddingNewDevice = false;
+    addDeviceWindowStartMs = 0;
 }
 
 void BleComms::clearTransmitBuffer()
@@ -249,13 +466,13 @@ void BleComms::queueResponseLine(const char *text)
     uint16_t textLength = static_cast<uint16_t>(strlen(text));
     uint16_t requiredBytes = textLength + 2;
 
-    // 1. Drop the whole line rather than sending a truncated one
+    // 1. Drop line if buffer capacity is exceeded
     if (!isDeviceConnected || requiredBytes > (transmitBufferSize - queuedByteCount))
     {
         return;
     }
 
-    // 2. Append the text followed by CR LF
+    // 2. Append text followed by CR LF
     for (uint16_t byteIndex = 0; byteIndex < requiredBytes; byteIndex++)
     {
         uint8_t byteToQueue = (byteIndex < textLength) ? static_cast<uint8_t>(text[byteIndex])
@@ -354,6 +571,12 @@ void BleComms::handleResetPasswordCommand(const char *arguments)
 
     eepromLogger.logEvent(LogEventType::PIN_CHANGED);
     queueResponseLine("[password] PIN updated.");
+}
+
+void BleComms::handleClearBtCommand(const char * /*arguments*/)
+{
+    clearTrustedDevices();
+    queueResponseLine("[bt] Trusted devices cleared.");
 }
 
 void BleComms::handleHelpCommand(const char * /*arguments*/)

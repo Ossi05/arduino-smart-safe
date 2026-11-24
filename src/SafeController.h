@@ -63,7 +63,7 @@ private:
     bool          isBluetoothScreenActive;
     bool          isBluetoothMessageTimed;
     unsigned long bluetoothMessageStartTimeMs;
-    uint8_t       displayedPairingSeconds;
+    uint8_t       displayedAddDeviceSeconds;
 
     // Keypad routing
     void handleKeypadInput();
@@ -98,12 +98,12 @@ private:
     void showEnterNewPinUI();
     void showPasswordChangedUI();
 
-    // Bluetooth pairing helpers
-    void handleBluetoothPairingKey();
+    // Bluetooth device management helpers
+    void handleBluetoothAddDeviceKey();
     void updateBluetoothDisplay();
     void startTimedBluetoothMessage(const char *message);
-    void showUnlockToPairUI();
-    void showBluetoothPairingUI(uint8_t remainingSeconds);
+    void showUnlockToAddBtUI();
+    void showAddDeviceUI(uint8_t remainingSeconds);
 
 public:
     SafeController(WatchdogManager &watchdogManager,
