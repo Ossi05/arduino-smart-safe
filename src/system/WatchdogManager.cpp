@@ -1,19 +1,6 @@
 #include "WatchdogManager.h"
 
-extern "C" void WDT_IRQHandler(void);
-
 volatile bool WatchdogManager::watchdogInterruptTriggered = false;
-
-extern "C" void WDT_IRQHandler(void)
-{
-    if (NRF_WDT->EVENTS_TIMEOUT != 0)
-    {
-        NRF_WDT->EVENTS_TIMEOUT = 0;
-        (void)NRF_WDT->EVENTS_TIMEOUT;
-    }
-
-    WatchdogManager::handleWatchdogInterrupt();
-}
 
 void WatchdogManager::handleWatchdogInterrupt()
 {
@@ -82,21 +69,13 @@ void WatchdogManager::begin()
     NRF_WDT->CRV = WATCHDOG_COUNTER_RELOAD_VALUE;
     NRF_WDT->RREN = WDT_RREN_RR0_Msk;
 
-    // 5. Enable WDT timeout interrupt for pre-reset fault marker capture
-    NRF_WDT->EVENTS_TIMEOUT = 0;
-    NRF_WDT->INTENSET = WDT_INTENSET_TIMEOUT_Msk;
-    NVIC_SetVector(WDT_IRQn, reinterpret_cast<uint32_t>(&WDT_IRQHandler));
-    NVIC_SetPriority(WDT_IRQn, WATCHDOG_INTERRUPT_PRIORITY);
-    NVIC_ClearPendingIRQ(WDT_IRQn);
-    NVIC_EnableIRQ(WDT_IRQn);
-
-    // 6. Start the hardware watchdog timer
+    // 5. Start the hardware watchdog timer
     NRF_WDT->TASKS_START = 1;
 }
 
 void WatchdogManager::resetWatchdog()
 {
-    NRF_WDT->RR[0] = WDT_RR_RR_VALUE;
+    NRF_WDT->RR[0] = WDT_RR_RR_Reload;
 }
 
 bool WatchdogManager::wasResetByWatchdog() const

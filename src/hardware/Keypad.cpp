@@ -1,6 +1,8 @@
 #include "Keypad.h"
 #include "NanoPinMap.h"
 
+extern "C" void keypadTimer3Isr(void);
+
 Keypad *Keypad::instance = nullptr;
 
 static constexpr char DEFAULT_KEY_LAYOUT[4][4] = {
@@ -46,7 +48,7 @@ bool Keypad::begin()
     // 2. Configure the matrix GPIO pins
     configureMatrixPins();
 
-    // 3. Start the 5 ms NRF_TIMER2 scan interrupt
+    // 3. Start the 5 ms NRF_TIMER3 scan interrupt
     startScanTimer();
     return true;
 }
@@ -68,30 +70,30 @@ void Keypad::configureMatrixPins()
 
 void Keypad::startScanTimer()
 {
-    // 1. Stop and reset NRF_TIMER2 before reconfiguring it
-    NRF_TIMER2->TASKS_STOP = 1;
-    NRF_TIMER2->TASKS_CLEAR = 1;
+    // 1. Stop and reset NRF_TIMER3 before reconfiguring it
+    NRF_TIMER3->TASKS_STOP = 1;
+    NRF_TIMER3->TASKS_CLEAR = 1;
 
     // 2. 32-bit timer mode at 1 MHz, compare match every 5 ms with automatic counter clear
-    NRF_TIMER2->MODE = TIMER_MODE_MODE_Timer << TIMER_MODE_MODE_Pos;
-    NRF_TIMER2->BITMODE = TIMER_BITMODE_BITMODE_32Bit << TIMER_BITMODE_BITMODE_Pos;
-    NRF_TIMER2->PRESCALER = SCAN_TIMER_PRESCALER;
-    NRF_TIMER2->CC[0] = SCAN_INTERVAL_MICROSECONDS;
-    NRF_TIMER2->SHORTS = TIMER_SHORTS_COMPARE0_CLEAR_Msk;
+    NRF_TIMER3->MODE = TIMER_MODE_MODE_Timer << TIMER_MODE_MODE_Pos;
+    NRF_TIMER3->BITMODE = TIMER_BITMODE_BITMODE_32Bit << TIMER_BITMODE_BITMODE_Pos;
+    NRF_TIMER3->PRESCALER = SCAN_TIMER_PRESCALER;
+    NRF_TIMER3->CC[0] = SCAN_INTERVAL_MICROSECONDS;
+    NRF_TIMER3->SHORTS = TIMER_SHORTS_COMPARE0_CLEAR_Msk;
 
     // 3. Enable only the COMPARE[0] interrupt
-    NRF_TIMER2->EVENTS_COMPARE[0] = 0;
-    NRF_TIMER2->INTENCLR = 0xFFFFFFFFUL;
-    NRF_TIMER2->INTENSET = TIMER_INTENSET_COMPARE0_Msk;
+    NRF_TIMER3->EVENTS_COMPARE[0] = 0;
+    NRF_TIMER3->INTENCLR = 0xFFFFFFFFUL;
+    NRF_TIMER3->INTENSET = TIMER_INTENSET_COMPARE0_Msk;
 
     // 4. Mbed OS relocates the vector table to RAM, so install the handler explicitly before enabling it
-    NVIC_SetVector(TIMER2_IRQn, reinterpret_cast<uint32_t>(&TIMER2_IRQHandler));
-    NVIC_SetPriority(TIMER2_IRQn, SCAN_INTERRUPT_PRIORITY);
-    NVIC_ClearPendingIRQ(TIMER2_IRQn);
-    NVIC_EnableIRQ(TIMER2_IRQn);
+    NVIC_SetVector(TIMER3_IRQn, reinterpret_cast<uint32_t>(&keypadTimer3Isr));
+    NVIC_SetPriority(TIMER3_IRQn, SCAN_INTERRUPT_PRIORITY);
+    NVIC_ClearPendingIRQ(TIMER3_IRQn);
+    NVIC_EnableIRQ(TIMER3_IRQn);
 
     // 5. Start counting
-    NRF_TIMER2->TASKS_START = 1;
+    NRF_TIMER3->TASKS_START = 1;
 }
 
 void Keypad::waitForRowToSettle() const
@@ -185,31 +187,31 @@ bool Keypad::hasQueuedKey() const
 char Keypad::getNextQueuedKey()
 {
     // 1. Mask only the keypad scan interrupt while touching the shared queue
-    NVIC_DisableIRQ(TIMER2_IRQn);
+    NVIC_DisableIRQ(TIMER3_IRQn);
     if (queueReadIndex == queueWriteIndex)
     {
-        NVIC_EnableIRQ(TIMER2_IRQn);
+        NVIC_EnableIRQ(TIMER3_IRQn);
         return '\0';
     }
 
     // 2. Retrieve next key and advance read index atomically
     char nextKey = keyPressQueue[queueReadIndex];
     queueReadIndex = (queueReadIndex + 1) % QUEUE_CAPACITY;
-    NVIC_EnableIRQ(TIMER2_IRQn);
+    NVIC_EnableIRQ(TIMER3_IRQn);
 
     return nextKey;
 }
 
-extern "C" void TIMER2_IRQHandler(void)
+extern "C" void keypadTimer3Isr(void)
 {
-    if (NRF_TIMER2->EVENTS_COMPARE[0] == 0)
+    if (NRF_TIMER3->EVENTS_COMPARE[0] == 0)
     {
         return;
     }
 
     // 1. Clear the compare event and read it back so the IRQ is not re-triggered on exit
-    NRF_TIMER2->EVENTS_COMPARE[0] = 0;
-    (void)NRF_TIMER2->EVENTS_COMPARE[0];
+    NRF_TIMER3->EVENTS_COMPARE[0] = 0;
+    (void)NRF_TIMER3->EVENTS_COMPARE[0];
 
     // 2. Run the debounced matrix scan
     Keypad::handleTimerInterrupt();

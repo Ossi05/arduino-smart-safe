@@ -50,7 +50,7 @@ void setup()
     // 3. Initialise display
     screen.begin(Wire);
 
-    // 4. Initialise keypad matrix and NRF_TIMER2 5 ms scan interrupt
+    // 4. Initialise keypad matrix and NRF_TIMER3 5 ms scan interrupt
     keypad.begin();
 
     // 5. Initialise servo lock using NRF_PWM0 on D3
