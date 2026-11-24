@@ -114,15 +114,15 @@ void Screen::print(const __FlashStringHelper *text, uint8_t row)
 
     setCursorPosition(0, row);
 
-    PGM_P p = reinterpret_cast<PGM_P>(text);
+    const char *textPointer = reinterpret_cast<const char *>(text);
     uint8_t column = 0;
     while (column < columnCount)
     {
-        char c = p ? pgm_read_byte(p) : '\0';
+        char c = textPointer ? *textPointer : '\0';
         if (c != '\0')
         {
             sendLcdData(c);
-            p++;
+            textPointer++;
         }
         else
         {
@@ -248,16 +248,16 @@ void Screen::setStatusText(const __FlashStringHelper *text)
     setCursorPosition(startColumn, 1);
     uint8_t maxCharacters = columnCount - startColumn;
 
-    PGM_P p = reinterpret_cast<PGM_P>(text);
+    const char *textPointer = reinterpret_cast<const char *>(text);
     for (uint8_t index = 0; index < maxCharacters; index++)
     {
-        char c = p ? pgm_read_byte(p) : '\0';
+        char c = textPointer ? *textPointer : '\0';
         if (c == '\0')
         {
             break;
         }
         sendLcdData(c);
-        p++;
+        textPointer++;
     }
 }
 

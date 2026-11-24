@@ -37,10 +37,8 @@ bool PasswordManager::setPassword(const char* newPin) {
         }
     }
 
-    // Write each digit to EEPROM
-    for (uint8_t i = 0; i < PIN_LENGTH; i++) {
-        EepromStorage::writeByte(PIN_START_ADDRESS + i, static_cast<uint8_t>(newPin[i]));
-    }
+    // Write all PIN digits to Flash storage in a single update
+    EepromStorage::writeBytes(PIN_START_ADDRESS, reinterpret_cast<const uint8_t *>(newPin), PIN_LENGTH);
     return true;
 }
 

@@ -33,26 +33,23 @@ String LogEvent::toString() const
 
 void EepromLogger::begin()
 {
-    // 1. Check if EEPROM has already been initialised
+    // 1. Check if Flash storage has already been initialised
     if (readByteFromEeprom(MARKER_ADDRESS) != INITIALIZED_MARKER)
     {
         nextWriteSlot = 0;
         storedLogCount = 0;
-        writeByteToEeprom(MARKER_ADDRESS, INITIALIZED_MARKER);
-        writeByteToEeprom(NEXT_SLOT_ADDRESS, 0);
-        writeByteToEeprom(NEXT_SLOT_ADDRESS + 1, 0);
-        writeByteToEeprom(LOG_COUNT_ADDRESS, 0);
-        writeByteToEeprom(LOG_COUNT_ADDRESS + 1, 0);
+        const uint8_t initialHeader[5] = {INITIALIZED_MARKER, 0, 0, 0, 0};
+        EepromStorage::writeBytes(MARKER_ADDRESS, initialHeader, sizeof(initialHeader));
     }
     else
     {
-        // 2. Restore state from EEPROM
+        // 2. Restore state from Flash storage
         nextWriteSlot = (static_cast<uint16_t>(readByteFromEeprom(NEXT_SLOT_ADDRESS)) << 8) |
                         readByteFromEeprom(NEXT_SLOT_ADDRESS + 1);
         storedLogCount = (static_cast<uint16_t>(readByteFromEeprom(LOG_COUNT_ADDRESS)) << 8) |
                          readByteFromEeprom(LOG_COUNT_ADDRESS + 1);
 
-        // 3. Reset if EEPROM contains corrupted slot values
+        // 3. Reset if stored slot values are corrupted
         if (nextWriteSlot >= MAX_LOGS_AMT || storedLogCount > MAX_LOGS_AMT)
         {
             clearLogs();
@@ -66,14 +63,11 @@ void EepromLogger::logEvent(LogEventType type)
     newEvent.event = type;
     newEvent.timestampSec = millis() / 1000UL;
 
-    uint16_t eepromAddress = LOGS_START_ADDRESS + (nextWriteSlot * sizeof(LogEvent));
+    uint16_t storageAddress = LOGS_START_ADDRESS + (nextWriteSlot * sizeof(LogEvent));
 
-    // 1. Write the new event to EEPROM
+    // 1. Write the new event block to Flash storage
     const uint8_t *bytePointer = reinterpret_cast<const uint8_t *>(&newEvent);
-    for (uint8_t i = 0; i < sizeof(LogEvent); i++)
-    {
-        writeByteToEeprom(eepromAddress + i, bytePointer[i]);
-    }
+    EepromStorage::writeBytes(storageAddress, bytePointer, sizeof(LogEvent));
 
     // 2. Update the next write slot and stored log count
     nextWriteSlot = (nextWriteSlot + 1) % MAX_LOGS_AMT;
@@ -82,11 +76,13 @@ void EepromLogger::logEvent(LogEventType type)
         storedLogCount++;
     }
 
-    // 3. Save updated pointers to EEPROM
-    writeByteToEeprom(NEXT_SLOT_ADDRESS, static_cast<uint8_t>(nextWriteSlot >> 8));
-    writeByteToEeprom(NEXT_SLOT_ADDRESS + 1, static_cast<uint8_t>(nextWriteSlot & 0xFF));
-    writeByteToEeprom(LOG_COUNT_ADDRESS, static_cast<uint8_t>(storedLogCount >> 8));
-    writeByteToEeprom(LOG_COUNT_ADDRESS + 1, static_cast<uint8_t>(storedLogCount & 0xFF));
+    // 3. Save updated pointers to Flash storage
+    const uint8_t updatedPointers[4] = {
+        static_cast<uint8_t>(nextWriteSlot >> 8),
+        static_cast<uint8_t>(nextWriteSlot & 0xFF),
+        static_cast<uint8_t>(storedLogCount >> 8),
+        static_cast<uint8_t>(storedLogCount & 0xFF)};
+    EepromStorage::writeBytes(NEXT_SLOT_ADDRESS, updatedPointers, sizeof(updatedPointers));
 }
 
 uint16_t EepromLogger::getAllEvents(LogEvent *eventsArray, uint16_t maxArraySize) const
@@ -118,10 +114,8 @@ void EepromLogger::clearLogs()
 {
     nextWriteSlot = 0;
     storedLogCount = 0;
-    writeByteToEeprom(NEXT_SLOT_ADDRESS, 0);
-    writeByteToEeprom(NEXT_SLOT_ADDRESS + 1, 0);
-    writeByteToEeprom(LOG_COUNT_ADDRESS, 0);
-    writeByteToEeprom(LOG_COUNT_ADDRESS + 1, 0);
+    const uint8_t clearedPointers[4] = {0, 0, 0, 0};
+    EepromStorage::writeBytes(NEXT_SLOT_ADDRESS, clearedPointers, sizeof(clearedPointers));
 }
 
 void EepromLogger::writeByteToEeprom(uint16_t address, uint8_t value)

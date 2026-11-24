@@ -3,28 +3,18 @@
 
 #include "UartComms.h"
 
-// Serial owns the USART0 interrupt and receive buffer through HardwareSerial.
 static constexpr uint32_t BAUD_RATE = 9600UL;
-
-static const char DESC_UNLOCK[] PROGMEM = "Unlock the safe";
-static const char DESC_LOCK[] PROGMEM = "Lock the safe";
-static const char DESC_STATUS[] PROGMEM = "Report current lock state";
-static const char DESC_LOGS[] PROGMEM = "Print all stored log events";
-static const char DESC_CLEAR_LOGS[] PROGMEM = "Erase all stored log events";
-static const char DESC_CHANGE_PW[] PROGMEM = "Change PIN: change password <oldPin> <newPin>";
-static const char DESC_RESET_PW[] PROGMEM = "Reset PIN to default, or set a new one (e.g. reset password 1234)";
-static const char DESC_HELP[] PROGMEM = "List all available commands";
 
 const UartComms::Command UartComms::COMMANDS[] =
     {
-        {"unlock", reinterpret_cast<const __FlashStringHelper *>(DESC_UNLOCK), &UartComms::handleUnlock},
-        {"lock", reinterpret_cast<const __FlashStringHelper *>(DESC_LOCK), &UartComms::handleLock},
-        {"status", reinterpret_cast<const __FlashStringHelper *>(DESC_STATUS), &UartComms::handleStatus},
-        {"logs", reinterpret_cast<const __FlashStringHelper *>(DESC_LOGS), &UartComms::handleLogs},
-        {"clear logs", reinterpret_cast<const __FlashStringHelper *>(DESC_CLEAR_LOGS), &UartComms::handleClearLogs},
-        {"change password", reinterpret_cast<const __FlashStringHelper *>(DESC_CHANGE_PW), &UartComms::handleChangePassword},
-        {"reset password", reinterpret_cast<const __FlashStringHelper *>(DESC_RESET_PW), &UartComms::handleResetPassword},
-        {"help", reinterpret_cast<const __FlashStringHelper *>(DESC_HELP), &UartComms::handleHelp},
+        {"unlock", "Unlock the safe", &UartComms::handleUnlock},
+        {"lock", "Lock the safe", &UartComms::handleLock},
+        {"status", "Report current lock state", &UartComms::handleStatus},
+        {"logs", "Print all stored log events", &UartComms::handleLogs},
+        {"clear logs", "Erase all stored log events", &UartComms::handleClearLogs},
+        {"change password", "Change PIN: change password <oldPin> <newPin>", &UartComms::handleChangePassword},
+        {"reset password", "Reset PIN to default, or set a new one (e.g. reset password 1234)", &UartComms::handleResetPassword},
+        {"help", "List all available commands", &UartComms::handleHelp},
 };
 
 const uint8_t UartComms::COMMAND_COUNT =
@@ -117,11 +107,11 @@ void UartComms::sendLine(const __FlashStringHelper *text)
     Serial.println(text);
 }
 
-void UartComms::sendUnsignedInteger(uint16_t number)
+void UartComms::sendUnsignedInteger(uint32_t number)
 {
     if (number >= 10)
     {
-        sendUnsignedInteger(static_cast<uint16_t>(number / 10));
+        sendUnsignedInteger(number / 10);
     }
     sendChar(static_cast<char>('0' + (number % 10)));
 }
