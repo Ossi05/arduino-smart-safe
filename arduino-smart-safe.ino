@@ -1,7 +1,7 @@
 // =============================================================================
 // Hardware wiring:
-//   Keypad rows      D4, D5, D6, D7   (PD4, PD5, PD6, PD7)
-//   Keypad columns   D8, D9, D10, D11 (PB0, PB1, PB2, PB3)
+//   Keypad rows (R1-R4)      D7, D6, D5, D4   (PD7, PD6, PD5, PD4)
+//   Keypad columns (C1-C4)   D11, D10, D9, D8 (PB3, PB2, PB1, PB0)
 //   ServoLock        D3               (PD3, Timer 2 PWM)
 //   Screen (LCD)     SDA/SCL          (PC4/PC5 or A4/A5)
 //   Buzzer           D2               (PD2, active buzzer)
@@ -39,35 +39,35 @@ UartComms uartComms(safeController, logger, passwordManager);
 
 void setup()
 {
-    // 1. Evaluate reset reason and clear MCUSR to prevent reboot loops
-    watchdogManager.checkAndClearResetReason();
+  // 1. Evaluate reset reason and clear MCUSR to prevent reboot loops
+  watchdogManager.checkAndClearResetReason();
 
-    // 2. Initialise storage layers first
-    logger.begin();
-    passwordManager.begin();
+  // 2. Initialise storage layers first
+  logger.begin();
+  passwordManager.begin();
 
-    // 3. Initialise display
-    screen.begin(Wire);
+  // 3. Initialise display
+  screen.begin(Wire);
 
-    // 4. Initialise input (sets up Timer 1 ISR)
-    keypad.begin();
+  // 4. Initialise input (sets up Timer 1 ISR)
+  keypad.begin();
 
-    // 5. Initialise servo (sets up Timer 2 PWM on D3)
-    servoLock.begin();
+  // 5. Initialise servo (sets up Timer 2 PWM on D3)
+  servoLock.begin();
 
-    // 6. Initialise safe controller (handles watchdog logging and default locked state)
-    safeController.begin();
+  // 6. Initialise safe controller (handles watchdog logging and default locked state)
+  safeController.begin();
 
-    // 7. Initialise UART and warn if watchdog reset occurred
-    uartComms.begin();
+  // 7. Initialise UART and warn if watchdog reset occurred
+  uartComms.begin();
 
-    // 8. Configure and arm the Watchdog Timer with a 2-second timeout
-    watchdogManager.begin();
+  // 8. Configure and arm the Watchdog Timer with a 2-second timeout
+  watchdogManager.begin();
 }
 
 void loop()
 {
-    watchdogManager.resetWatchdog();
-    safeController.update();
-    uartComms.update();
+  watchdogManager.resetWatchdog();
+  safeController.update();
+  uartComms.update();
 }

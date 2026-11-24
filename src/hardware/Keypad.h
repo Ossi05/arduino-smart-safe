@@ -2,19 +2,20 @@
 #include <Arduino.h>
 #include <avr/io.h>
 
-class Keypad {
+class Keypad
+{
 private:
     static constexpr uint8_t ROW_COUNT = 4;
     static constexpr uint8_t COLUMN_COUNT = 4;
     static constexpr uint8_t DEBOUNCE_SAMPLES = 4;
     static constexpr uint8_t QUEUE_CAPACITY = 16;
 
-    static constexpr uint8_t ROW_START_BIT = PD4;
-    static constexpr uint8_t COLUMN_START_BIT = PB0;
+    static constexpr uint8_t R1_BIT = PD7;
+    static constexpr uint8_t C1_BIT = PB3;
     static constexpr uint8_t ROW_PIN_MASK = (1 << PD4) | (1 << PD5) | (1 << PD6) | (1 << PD7);
     static constexpr uint8_t COLUMN_PIN_MASK = (1 << PB0) | (1 << PB1) | (1 << PB2) | (1 << PB3);
 
-    static Keypad* instance;
+    static Keypad *instance;
 
     char keyLayoutGrid[ROW_COUNT][COLUMN_COUNT];
 

@@ -1,37 +1,42 @@
 #include "Keypad.h"
 
-Keypad* Keypad::instance = nullptr;
+Keypad *Keypad::instance = nullptr;
 
 static constexpr char DEFAULT_KEY_LAYOUT[4][4] = {
     {'1', '2', '3', 'A'},
     {'4', '5', '6', 'B'},
     {'7', '8', '9', 'C'},
-    {'*', '0', '#', 'D'}
-};
+    {'*', '0', '#', 'D'}};
 
 Keypad::Keypad()
     : previousScannedKey('\0'),
       previouslyActiveKey('\0'),
       stableReadingCount(0),
       queueWriteIndex(0),
-      queueReadIndex(0) {
+      queueReadIndex(0)
+{
     // 1. Initialize the key layout grid
-    for (uint8_t row = 0; row < ROW_COUNT; row++) {
-        for (uint8_t column = 0; column < COLUMN_COUNT; column++) {
+    for (uint8_t row = 0; row < ROW_COUNT; row++)
+    {
+        for (uint8_t column = 0; column < COLUMN_COUNT; column++)
+        {
             keyLayoutGrid[row][column] = DEFAULT_KEY_LAYOUT[row][column];
         }
     }
 }
 
 Keypad::Keypad(const uint8_t rowPins[ROW_COUNT], const uint8_t columnPins[COLUMN_COUNT])
-    : Keypad() {
+    : Keypad()
+{
     (void)rowPins;
     (void)columnPins;
 }
 
-bool Keypad::begin() {
+bool Keypad::begin()
+{
     // 1. Setup the singleton instance
-    if (instance != nullptr && instance != this) {
+    if (instance != nullptr && instance != this)
+    {
         Serial.println(F("Error: Only one Keypad instance is supported."));
         return false;
     }
@@ -50,7 +55,8 @@ bool Keypad::begin() {
     return true;
 }
 
-void Keypad::setupTimer1() {
+void Keypad::setupTimer1()
+{
     // 1. Temporarily disable interrupts while configuring Timer 1
     noInterrupts();
 
@@ -69,24 +75,30 @@ void Keypad::setupTimer1() {
     interrupts();
 }
 
-char Keypad::getCurrentlyPressedKey() {
+char Keypad::getCurrentlyPressedKey()
+{
     char pressedKey = '\0';
 
-    // 1. Scan rows sequentially
-    for (uint8_t rowIndex = 0; rowIndex < ROW_COUNT; rowIndex++) {
+    // 1. Scan rows sequentially from R1 (PD7) down to R4 (PD4)
+    for (uint8_t rowIndex = 0; rowIndex < ROW_COUNT; rowIndex++)
+    {
         // Drive current row LOW while keeping inactive rows HIGH
-        PORTD = (PORTD | ROW_PIN_MASK) & ~(1 << (ROW_START_BIT + rowIndex));
+        PORTD = (PORTD | ROW_PIN_MASK) & ~(1 << (R1_BIT - rowIndex));
 
         // Settling delay for pull-up voltage stabilization
-        __asm__ __volatile__ ("nop\n\t" "nop\n\t");
+        __asm__ __volatile__("nop\n\t"
+                             "nop\n\t");
 
         // 2. Read column states in a single register read operation
         uint8_t columnPinStates = PINB & COLUMN_PIN_MASK;
 
-        // 3. Check if any column is pulled LOW by a pressed key
-        if (columnPinStates != COLUMN_PIN_MASK) {
-            for (uint8_t columnIndex = 0; columnIndex < COLUMN_COUNT; columnIndex++) {
-                if ((columnPinStates & (1 << (COLUMN_START_BIT + columnIndex))) == 0) {
+        // 3. Check if any column is pulled LOW by a pressed key (C1 = PB3 down to C4 = PB0)
+        if (columnPinStates != COLUMN_PIN_MASK)
+        {
+            for (uint8_t columnIndex = 0; columnIndex < COLUMN_COUNT; columnIndex++)
+            {
+                if ((columnPinStates & (1 << (C1_BIT - columnIndex))) == 0)
+                {
                     pressedKey = keyLayoutGrid[rowIndex][columnIndex];
                     break;
                 }
@@ -101,20 +113,24 @@ char Keypad::getCurrentlyPressedKey() {
     return pressedKey;
 }
 
-void Keypad::enqueueKey(char key) {
+void Keypad::enqueueKey(char key)
+{
     // 1. Calculate the next circular buffer write index
     uint8_t nextWriteIndex = (queueWriteIndex + 1) % QUEUE_CAPACITY;
 
     // 2. Store key if queue is not full
-    if (nextWriteIndex != queueReadIndex) {
+    if (nextWriteIndex != queueReadIndex)
+    {
         keyPressQueueArray[queueWriteIndex] = key;
         queueWriteIndex = nextWriteIndex;
     }
 }
 
-void Keypad::handleTimerInterrupt() {
+void Keypad::handleTimerInterrupt()
+{
     // 1. Verify singleton instance exists
-    if (instance == nullptr) {
+    if (instance == nullptr)
+    {
         return;
     }
 
@@ -122,30 +138,40 @@ void Keypad::handleTimerInterrupt() {
     char pressedKey = instance->getCurrentlyPressedKey();
 
     // 3. Process debounce state machine
-    if (pressedKey == instance->previousScannedKey) {
-        if (instance->stableReadingCount < DEBOUNCE_SAMPLES) {
+    if (pressedKey == instance->previousScannedKey)
+    {
+        if (instance->stableReadingCount < DEBOUNCE_SAMPLES)
+        {
             instance->stableReadingCount++;
-        } else if (pressedKey != instance->previouslyActiveKey) {
+        }
+        else if (pressedKey != instance->previouslyActiveKey)
+        {
             instance->previouslyActiveKey = pressedKey;
 
-            if (pressedKey != '\0') {
+            if (pressedKey != '\0')
+            {
                 instance->enqueueKey(pressedKey);
             }
         }
-    } else {
+    }
+    else
+    {
         instance->previousScannedKey = pressedKey;
         instance->stableReadingCount = 0;
     }
 }
 
-bool Keypad::hasQueuedKey() const {
+bool Keypad::hasQueuedKey() const
+{
     return queueReadIndex != queueWriteIndex;
 }
 
-char Keypad::getNextQueuedKey() {
+char Keypad::getNextQueuedKey()
+{
     // 1. Guard against reading from an empty queue with interrupts disabled
     noInterrupts();
-    if (queueReadIndex == queueWriteIndex) {
+    if (queueReadIndex == queueWriteIndex)
+    {
         interrupts();
         return '\0';
     }
@@ -158,6 +184,7 @@ char Keypad::getNextQueuedKey() {
     return nextKey;
 }
 
-ISR(TIMER1_COMPA_vect) {
+ISR(TIMER1_COMPA_vect)
+{
     Keypad::handleTimerInterrupt();
 }
