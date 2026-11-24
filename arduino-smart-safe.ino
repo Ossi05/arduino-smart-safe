@@ -20,6 +20,7 @@
 #include "src/hardware/ServoLock.h"
 #include "src/storage/EepromLogger.h"
 #include "src/storage/PasswordManager.h"
+#include "src/system/BleComms.h"
 #include "src/system/UartComms.h"
 #include "src/system/WatchdogManager.h"
 #include "src/SafeController.h"
@@ -37,6 +38,7 @@ Led greenLed(getNanoGpioPin(NanoPin::DIGITAL_13));
 
 SafeController safeController(watchdogManager, logger, passwordManager, keypad, screen, servoLock, buzzer, redLed, greenLed);
 UartComms uartComms(safeController, logger, passwordManager);
+BleComms bleComms(safeController, logger, passwordManager);
 
 void setup()
 {
@@ -57,12 +59,16 @@ void setup()
     servoLock.begin();
 
     // 6. Initialise safe controller (handles watchdog logging and default locked state)
+    safeController.attachBleComms(bleComms);
     safeController.begin();
 
     // 7. Initialise serial communication
     uartComms.begin();
 
-    // 8. Configure and arm NRF_WDT with a 2-second timeout
+    // 8. Start BLE with advertising off until 'B' is pressed while unlocked
+    bleComms.begin();
+
+    // 9. Configure and arm NRF_WDT with a 2-second timeout
     watchdogManager.begin();
 }
 
@@ -71,4 +77,5 @@ void loop()
     watchdogManager.resetWatchdog();
     safeController.update();
     uartComms.update();
+    bleComms.update();
 }

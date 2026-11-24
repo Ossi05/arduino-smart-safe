@@ -1,4 +1,5 @@
 #include "SafeController.h"
+#include "system/BleComms.h"
 
 SafeController::SafeController(WatchdogManager &watchdogManager,
                                EepromLogger &logger,
@@ -24,7 +25,12 @@ SafeController::SafeController(WatchdogManager &watchdogManager,
       statusDisplay(screen),
       enteredPinLength(0),
       lastDigitInputTimeMs(0),
-      wrongPinDisplayStartTimeMs(0)
+      wrongPinDisplayStartTimeMs(0),
+      bleComms(nullptr),
+      isBluetoothScreenActive(false),
+      isBluetoothMessageTimed(false),
+      bluetoothMessageStartTimeMs(0),
+      displayedPairingSeconds(NO_PAIRING_SECONDS_DISPLAYED)
 {
     // Zero-initialise the PIN buffer so it is always null-terminated.
     for (uint8_t i = 0; i <= MAX_PIN_LENGTH; i++)
@@ -76,6 +82,7 @@ void SafeController::update()
     checkWrongPinDisplayTimeout();
     checkStatusDisplayTimeout();
     handleKeypadInput();
+    updateBluetoothDisplay();
 }
 
 bool SafeController::isLocked() const
@@ -86,6 +93,11 @@ bool SafeController::isLocked() const
 SafeState SafeController::getState() const
 {
     return state;
+}
+
+void SafeController::attachBleComms(BleComms &bleComms)
+{
+    this->bleComms = &bleComms;
 }
 
 void SafeController::setBluetoothConnected(bool connected)
@@ -103,6 +115,11 @@ void SafeController::lock()
 
     servoLock.lock();
     state = SafeState::LOCKED;
+    isBluetoothScreenActive = false;
+    if (bleComms != nullptr)
+    {
+        bleComms->cancelPairingWindow();
+    }
     failedAttemptCount = 0;
 
     greenLed.off();
@@ -171,6 +188,7 @@ void SafeController::handleKeypadInput()
             handleCancelKey();
             break;
         case 'B':
+            handleBluetoothPairingKey();
             break;
         default:
             if (key >= '0' && key <= '9')
@@ -573,4 +591,118 @@ void SafeController::showPasswordChangedUI()
     screen.print(F("PIN changed!"), 0);
     screen.setStatusIcon(0, SafeIcon::UNLOCKED);
     screen.setStatusText(F("# to lock"));
+}
+
+
+
+void SafeController::handleBluetoothPairingKey()
+{
+    if (bleComms == nullptr)
+    {
+        return;
+    }
+
+    // 1. Locked: refuse and tell the user why.
+    if (state != SafeState::UNLOCKED)
+    {
+        resetPinBuffer();
+        showUnlockToPairUI();
+        wrongPinDisplayStartTimeMs = millis();
+        return;
+    }
+
+    // 2. Unlocked: drop the current device and open a new 60-second pairing window
+    if (state == SafeState::UNLOCKED)
+    {
+        bleComms->startNewPairingWindow();
+    }
+}
+
+void SafeController::updateBluetoothDisplay()
+{
+    if (bleComms == nullptr)
+    {
+        return;
+    }
+
+    // 1. Mirror connection events on the status page
+    BleEvent event = bleComms->consumePendingEvent();
+    if (event == BleEvent::PAIRING_STARTED || event == BleEvent::DEVICE_DISCONNECTED)
+    {
+        statusDisplay.setBluetoothConnected(false);
+    }
+    else if (event == BleEvent::DEVICE_CONNECTED)
+    {
+        statusDisplay.setBluetoothConnected(true);
+    }
+
+    // 2. Only draw over the unlocked screen
+    if (state != SafeState::UNLOCKED)
+    {
+        isBluetoothScreenActive = false;
+        return;
+    }
+
+    switch (event)
+    {
+    case BleEvent::PAIRING_STARTED:
+        isBluetoothScreenActive = true;
+        isBluetoothMessageTimed = false;
+        displayedPairingSeconds = NO_PAIRING_SECONDS_DISPLAYED;
+        break;
+    case BleEvent::DEVICE_CONNECTED:
+        startTimedBluetoothMessage("BT Connected");
+        break;
+    case BleEvent::DEVICE_DISCONNECTED:
+        startTimedBluetoothMessage("BT Disconnected");
+        break;
+    case BleEvent::PAIRING_TIMED_OUT:
+        startTimedBluetoothMessage("BT Pair timeout");
+        break;
+    case BleEvent::NONE:
+    default:
+        break;
+    }
+
+    // 3. Refresh the pairing countdown once per second
+    if (isBluetoothScreenActive && !isBluetoothMessageTimed && bleComms->isPairingWindowOpen())
+    {
+        uint8_t remainingSeconds = bleComms->getRemainingPairingSeconds();
+        if (remainingSeconds != displayedPairingSeconds)
+        {
+            displayedPairingSeconds = remainingSeconds;
+            showBluetoothPairingUI(remainingSeconds);
+        }
+    }
+
+    // 4. Restore the unlocked screen when a timed message expires
+    if (isBluetoothScreenActive && isBluetoothMessageTimed &&
+        millis() - bluetoothMessageStartTimeMs >= BLUETOOTH_MESSAGE_DURATION_MS)
+    {
+        isBluetoothScreenActive = false;
+        showUnlockedUI();
+    }
+}
+
+void SafeController::startTimedBluetoothMessage(const char *message)
+{
+    isBluetoothScreenActive = true;
+    isBluetoothMessageTimed = true;
+    bluetoothMessageStartTimeMs = millis();
+    screen.print(message, 0);
+}
+
+void SafeController::showUnlockToPairUI()
+{
+    screen.clear();
+    screen.print(F("Unlock to pair"), 0);
+    screen.setStatusIcon(0, SafeIcon::BLUETOOTH);
+    screen.setStatusText(F("Bluetooth"));
+}
+
+void SafeController::showBluetoothPairingUI(uint8_t remainingSeconds)
+{
+    char pairingLine[17];
+    snprintf(pairingLine, sizeof(pairingLine), "BT Pairing: %us", static_cast<unsigned>(remainingSeconds));
+    screen.print(pairingLine, 0);
 }

@@ -18,6 +18,8 @@
 //   C -> enter password-change mode (only when unlocked)
 //   D -> cancel current PIN entry and return to the previous screen
 
+class BleComms;
+
 enum class SafeState : uint8_t
 {
     LOCKED,
@@ -34,6 +36,8 @@ private:
     static constexpr uint8_t        MAX_FAILED_ATTEMPTS             = 3;
     static constexpr unsigned long  PIN_ENTRY_TIMEOUT_MS            = 5000;
     static constexpr unsigned long  WRONG_PIN_DISPLAY_DURATION_MS   = 3000;
+    static constexpr unsigned long  BLUETOOTH_MESSAGE_DURATION_MS   = 3000;
+    static constexpr uint8_t        NO_PAIRING_SECONDS_DISPLAYED    = 0xFF;
 
     WatchdogManager &watchdogManager;
     EepromLogger    &logger;
@@ -54,6 +58,12 @@ private:
     uint8_t       enteredPinLength;
     unsigned long lastDigitInputTimeMs;
     unsigned long wrongPinDisplayStartTimeMs;
+
+    BleComms     *bleComms;
+    bool          isBluetoothScreenActive;
+    bool          isBluetoothMessageTimed;
+    unsigned long bluetoothMessageStartTimeMs;
+    uint8_t       displayedPairingSeconds;
 
     // Keypad routing
     void handleKeypadInput();
@@ -88,6 +98,13 @@ private:
     void showEnterNewPinUI();
     void showPasswordChangedUI();
 
+    // Bluetooth pairing helpers
+    void handleBluetoothPairingKey();
+    void updateBluetoothDisplay();
+    void startTimedBluetoothMessage(const char *message);
+    void showUnlockToPairUI();
+    void showBluetoothPairingUI(uint8_t remainingSeconds);
+
 public:
     SafeController(WatchdogManager &watchdogManager,
                    EepromLogger    &logger,
@@ -106,6 +123,7 @@ public:
     void unlock();
     bool changePassword(const char *newPin);
 
+    void attachBleComms(BleComms &bleComms);
     void setBluetoothConnected(bool connected);
 
     bool      isLocked() const;
