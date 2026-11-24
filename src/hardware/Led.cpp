@@ -1,9 +1,7 @@
 #include "Led.h"
 
-Led::Led(volatile uint8_t &ddrRegister, volatile uint8_t &portRegister, uint8_t pinBitMask)
-    : ddrRegister(ddrRegister),
-      portRegister(portRegister),
-      pinBitMask(pinBitMask),
+Led::Led(GpioPin ledPin)
+    : ledPin(ledPin),
       activeFlashMode(FlashMode::NONE),
       isLedCurrentlyOn(false),
       previousLedState(false),
@@ -15,8 +13,7 @@ Led::Led(volatile uint8_t &ddrRegister, volatile uint8_t &portRegister, uint8_t 
 
 void Led::begin()
 {
-    // Configure the pin as an output
-    ddrRegister |= pinBitMask;
+    ledPin.configureAsPushPullOutput();
     off();
 }
 
@@ -25,11 +22,11 @@ void Led::setPinState(bool turnOn)
     isLedCurrentlyOn = turnOn;
     if (turnOn)
     {
-        portRegister |= pinBitMask;
+        ledPin.setHigh();
     }
     else
     {
-        portRegister &= ~pinBitMask;
+        ledPin.setLow();
     }
 }
 

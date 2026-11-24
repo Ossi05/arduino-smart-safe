@@ -1,6 +1,7 @@
 #pragma once
 #include <Arduino.h>
-#include <avr/io.h>
+#include <nrf.h>
+#include "GpioPin.h"
 
 class Led
 {
@@ -13,9 +14,7 @@ private:
         CONTINUOUS,
     };
 
-    volatile uint8_t &ddrRegister;
-    volatile uint8_t &portRegister;
-    uint8_t pinBitMask;
+    GpioPin ledPin;
 
     FlashMode activeFlashMode;
     bool isLedCurrentlyOn;
@@ -28,7 +27,7 @@ private:
     void startTimedFlash(uint8_t flashCount, uint16_t intervalMs, FlashMode mode);
 
 public:
-    Led(volatile uint8_t &ddrRegister, volatile uint8_t &portRegister, uint8_t pinBitMask);
+    explicit Led(GpioPin ledPin);
 
     void begin();
     void on();

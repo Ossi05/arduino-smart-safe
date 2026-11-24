@@ -1,10 +1,8 @@
 #pragma once
 #include <Arduino.h>
-#include <avr/io.h>
-
-#define BUZZER_DDR DDRD
-#define BUZZER_PORT PORTD
-#define BUZZER_PIN PD2
+#include <nrf.h>
+#include "GpioPin.h"
+#include "NanoPinMap.h"
 
 enum class BuzzerPattern : uint8_t
 {
@@ -26,6 +24,8 @@ private:
         uint16_t durationMs;
         bool buzzerOn;
     };
+
+    const GpioPin buzzerPin = getNanoGpioPin(NanoPin::DIGITAL_2);
 
     BuzzerPattern activePattern;
     bool patternRepeats;

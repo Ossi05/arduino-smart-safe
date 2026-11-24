@@ -1,4 +1,5 @@
 #include "Keypad.h"
+#include "NanoPinMap.h"
 
 Keypad *Keypad::instance = nullptr;
 
@@ -9,13 +10,20 @@ static constexpr char DEFAULT_KEY_LAYOUT[4][4] = {
     {'*', '0', '#', 'D'}};
 
 Keypad::Keypad()
-    : previousScannedKey('\0'),
+    : rowPins{getNanoGpioPin(NanoPin::DIGITAL_7),
+              getNanoGpioPin(NanoPin::DIGITAL_6),
+              getNanoGpioPin(NanoPin::DIGITAL_5),
+              getNanoGpioPin(NanoPin::DIGITAL_4)},
+      columnPins{getNanoGpioPin(NanoPin::DIGITAL_11),
+                 getNanoGpioPin(NanoPin::DIGITAL_10),
+                 getNanoGpioPin(NanoPin::DIGITAL_9),
+                 getNanoGpioPin(NanoPin::DIGITAL_8)},
+      previousScannedKey('\0'),
       previouslyActiveKey('\0'),
       stableReadingCount(0),
       queueWriteIndex(0),
       queueReadIndex(0)
 {
-    // 1. Initialize the key layout grid
     for (uint8_t row = 0; row < ROW_COUNT; row++)
     {
         for (uint8_t column = 0; column < COLUMN_COUNT; column++)
@@ -25,16 +33,9 @@ Keypad::Keypad()
     }
 }
 
-Keypad::Keypad(const uint8_t rowPins[ROW_COUNT], const uint8_t columnPins[COLUMN_COUNT])
-    : Keypad()
-{
-    (void)rowPins;
-    (void)columnPins;
-}
-
 bool Keypad::begin()
 {
-    // 1. Setup the singleton instance
+    // 1. Setup the singleton instance used by the interrupt handler
     if (instance != nullptr && instance != this)
     {
         Serial.println(F("Error: Only one Keypad instance is supported."));
@@ -42,73 +43,88 @@ bool Keypad::begin()
     }
     instance = this;
 
-    // 2. Configure row pins (PD4-PD7) as outputs and initialize them to HIGH
-    DDRD |= ROW_PIN_MASK;
-    PORTD |= ROW_PIN_MASK;
+    // 2. Configure the matrix GPIO pins
+    configureMatrixPins();
 
-    // 3. Configure column pins (PB0-PB3) as inputs and enable internal pull-up resistors
-    DDRB &= ~COLUMN_PIN_MASK;
-    PORTB |= COLUMN_PIN_MASK;
-
-    // 4. Setup Timer 1 for non-blocking debounced matrix scanning
-    setupTimer1();
+    // 3. Start the 5 ms NRF_TIMER2 scan interrupt
+    startScanTimer();
     return true;
 }
 
-void Keypad::setupTimer1()
+void Keypad::configureMatrixPins()
 {
-    // 1. Temporarily disable interrupts while configuring Timer 1
-    noInterrupts();
+    // 1. Rows R1-R4 (P0.23, P1.14, P1.13, P1.15) are open-drain so two pressed keys can never short HIGH to LOW
+    for (uint8_t rowIndex = 0; rowIndex < ROW_COUNT; rowIndex++)
+    {
+        rowPins[rowIndex].configureAsOpenDrainOutput();
+    }
 
-    // 2. Reset Timer 1 control and count registers
-    TCCR1A = 0;
-    TCCR1B = 0;
-    TCNT1 = 0;
+    // 2. Columns C1-C4 (P1.01, P1.02, P0.27, P0.21) are inputs with internal pull-ups
+    for (uint8_t columnIndex = 0; columnIndex < COLUMN_COUNT; columnIndex++)
+    {
+        columnPins[columnIndex].configureAsInputWithPullUp();
+    }
+}
 
-    // 3. Configure CTC mode with a 64 prescaler for 5ms intervals (16MHz / (64 * 200Hz) - 1 = 1249)
-    OCR1A = 1249;
-    TCCR1B |= (1 << WGM12);
-    TCCR1B |= (1 << CS11) | (1 << CS10);
-    TIMSK1 |= (1 << OCIE1A);
+void Keypad::startScanTimer()
+{
+    // 1. Stop and reset NRF_TIMER2 before reconfiguring it
+    NRF_TIMER2->TASKS_STOP = 1;
+    NRF_TIMER2->TASKS_CLEAR = 1;
 
-    // 4. Re-enable interrupts
-    interrupts();
+    // 2. 32-bit timer mode at 1 MHz, compare match every 5 ms with automatic counter clear
+    NRF_TIMER2->MODE = TIMER_MODE_MODE_Timer << TIMER_MODE_MODE_Pos;
+    NRF_TIMER2->BITMODE = TIMER_BITMODE_BITMODE_32Bit << TIMER_BITMODE_BITMODE_Pos;
+    NRF_TIMER2->PRESCALER = SCAN_TIMER_PRESCALER;
+    NRF_TIMER2->CC[0] = SCAN_INTERVAL_MICROSECONDS;
+    NRF_TIMER2->SHORTS = TIMER_SHORTS_COMPARE0_CLEAR_Msk;
+
+    // 3. Enable only the COMPARE[0] interrupt
+    NRF_TIMER2->EVENTS_COMPARE[0] = 0;
+    NRF_TIMER2->INTENCLR = 0xFFFFFFFFUL;
+    NRF_TIMER2->INTENSET = TIMER_INTENSET_COMPARE0_Msk;
+
+    // 4. Mbed OS relocates the vector table to RAM, so install the handler explicitly before enabling it
+    NVIC_SetVector(TIMER2_IRQn, reinterpret_cast<uint32_t>(&TIMER2_IRQHandler));
+    NVIC_SetPriority(TIMER2_IRQn, SCAN_INTERRUPT_PRIORITY);
+    NVIC_ClearPendingIRQ(TIMER2_IRQn);
+    NVIC_EnableIRQ(TIMER2_IRQn);
+
+    // 5. Start counting
+    NRF_TIMER2->TASKS_START = 1;
+}
+
+void Keypad::waitForRowToSettle() const
+{
+    for (uint8_t nopIndex = 0; nopIndex < ROW_SETTLE_NOP_COUNT; nopIndex++)
+    {
+        __NOP();
+    }
 }
 
 char Keypad::getCurrentlyPressedKey()
 {
     char pressedKey = '\0';
 
-    // 1. Scan rows sequentially from R1 (PD7) down to R4 (PD4)
-    for (uint8_t rowIndex = 0; rowIndex < ROW_COUNT; rowIndex++)
+    for (uint8_t rowIndex = 0; rowIndex < ROW_COUNT && pressedKey == '\0'; rowIndex++)
     {
-        // Drive current row LOW while keeping inactive rows HIGH
-        PORTD = (PORTD | ROW_PIN_MASK) & ~(1 << (R1_BIT - rowIndex));
+        // 1. Pull only the current row LOW (OUTCLR) and let the column lines settle
+        rowPins[rowIndex].setLow();
+        waitForRowToSettle();
 
-        // Settling delay for pull-up voltage stabilization
-        __asm__ __volatile__("nop\n\t"
-                             "nop\n\t");
-
-        // 2. Read column states in a single register read operation
-        uint8_t columnPinStates = PINB & COLUMN_PIN_MASK;
-
-        // 3. Check if any column is pulled LOW by a pressed key (C1 = PB3 down to C4 = PB0)
-        if (columnPinStates != COLUMN_PIN_MASK)
+        // 2. A pressed key connects its column to the active row, so that column reads LOW in the IN register
+        for (uint8_t columnIndex = 0; columnIndex < COLUMN_COUNT; columnIndex++)
         {
-            for (uint8_t columnIndex = 0; columnIndex < COLUMN_COUNT; columnIndex++)
+            if (!columnPins[columnIndex].isHigh())
             {
-                if ((columnPinStates & (1 << (C1_BIT - columnIndex))) == 0)
-                {
-                    pressedKey = keyLayoutGrid[rowIndex][columnIndex];
-                    break;
-                }
+                pressedKey = keyLayoutGrid[rowIndex][columnIndex];
+                break;
             }
-            break;
         }
-    }
 
-    // 4. Restore all row pins to HIGH at the end of the scan cycle
-    PORTD |= ROW_PIN_MASK;
+        // 3. Release the row (OUTSET) before scanning the next one
+        rowPins[rowIndex].setHigh();
+    }
 
     return pressedKey;
 }
@@ -121,7 +137,7 @@ void Keypad::enqueueKey(char key)
     // 2. Store key if queue is not full
     if (nextWriteIndex != queueReadIndex)
     {
-        keyPressQueueArray[queueWriteIndex] = key;
+        keyPressQueue[queueWriteIndex] = key;
         queueWriteIndex = nextWriteIndex;
     }
 }
@@ -168,23 +184,33 @@ bool Keypad::hasQueuedKey() const
 
 char Keypad::getNextQueuedKey()
 {
-    // 1. Guard against reading from an empty queue with interrupts disabled
-    noInterrupts();
+    // 1. Mask only the keypad scan interrupt while touching the shared queue
+    NVIC_DisableIRQ(TIMER2_IRQn);
     if (queueReadIndex == queueWriteIndex)
     {
-        interrupts();
+        NVIC_EnableIRQ(TIMER2_IRQn);
         return '\0';
     }
 
     // 2. Retrieve next key and advance read index atomically
-    char nextKey = keyPressQueueArray[queueReadIndex];
+    char nextKey = keyPressQueue[queueReadIndex];
     queueReadIndex = (queueReadIndex + 1) % QUEUE_CAPACITY;
-    interrupts();
+    NVIC_EnableIRQ(TIMER2_IRQn);
 
     return nextKey;
 }
 
-ISR(TIMER1_COMPA_vect)
+extern "C" void TIMER2_IRQHandler(void)
 {
+    if (NRF_TIMER2->EVENTS_COMPARE[0] == 0)
+    {
+        return;
+    }
+
+    // 1. Clear the compare event and read it back so the IRQ is not re-triggered on exit
+    NRF_TIMER2->EVENTS_COMPARE[0] = 0;
+    (void)NRF_TIMER2->EVENTS_COMPARE[0];
+
+    // 2. Run the debounced matrix scan
     Keypad::handleTimerInterrupt();
 }

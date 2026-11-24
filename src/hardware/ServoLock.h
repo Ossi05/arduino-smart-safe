@@ -1,22 +1,25 @@
 #pragma once
-#include <stdint.h>
+#include <Arduino.h>
+#include <nrf.h>
+#include "GpioPin.h"
+#include "NanoPinMap.h"
 
-/*
- * This servoLock class  uses pin D3 And Timer 2 
-*/
-
-class ServoLock {
+class ServoLock
+{
 private:
-    // Timer 2 Fast PWM pulse width = (OCR2B + 1) * 64 us (at 16 MHz / 1024 prescaler)
-    static constexpr uint8_t MIN_PULSE_TICKS = 8;  // ~0.58 ms hard lower limit
-    static constexpr uint8_t MAX_PULSE_TICKS = 38; // ~2.50 ms hard upper limit
+    static constexpr uint16_t PWM_PERIOD_MICROSECONDS = 20000; // 50 Hz servo frame at a 1 MHz PWM clock
+    static constexpr uint16_t MIN_PULSE_WIDTH_MICROSECONDS = 1000;
+    static constexpr uint16_t MAX_PULSE_WIDTH_MICROSECONDS = 2000;
+    static constexpr uint16_t LOCKED_PULSE_WIDTH_MICROSECONDS = 1000;   // 0 degrees
+    static constexpr uint16_t UNLOCKED_PULSE_WIDTH_MICROSECONDS = 1500; // 90 degrees
+    static constexpr uint16_t PWM_ACTIVE_HIGH_POLARITY_FLAG = 0x8000;
+    static constexpr uint8_t PWM_CHANNEL_COUNT = 4;
 
-    static constexpr uint8_t LOCKED_PULSE   = 12;  // ~0.83 ms (0 degrees)
-    static constexpr uint8_t UNLOCKED_PULSE = 23;  // ~1.54 ms (90 degrees)
-
+    const GpioPin servoPin = getNanoGpioPin(NanoPin::DIGITAL_3);
+    volatile uint16_t pwmSequenceBuffer = PWM_ACTIVE_HIGH_POLARITY_FLAG | LOCKED_PULSE_WIDTH_MICROSECONDS;
     bool lockedState = true;
 
-    void setPulseWidth(uint8_t ticks);
+    void setPulseWidth(uint16_t pulseWidthMicroseconds);
 
 public:
     void begin();

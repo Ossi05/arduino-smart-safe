@@ -39,8 +39,8 @@ const uint8_t Buzzer::ALARM_STEP_COUNT = sizeof(ALARM_STEPS) / sizeof(BeepStep);
 
 void Buzzer::begin()
 {
-    // 1. Configure D2 (PD2) as output via direct AVR register.
-    BUZZER_DDR |= (1 << BUZZER_PIN);
+    // 1. Configure D2 (P1.11) as a push-pull output through the NRF_P1 registers.
+    buzzerPin.configureAsPushPullOutput();
 
     // 2. Start silent.
     setBuzzerOff();
@@ -152,10 +152,10 @@ void Buzzer::applyCurrentStep()
 
 void Buzzer::setBuzzerOn()
 {
-    BUZZER_PORT |= (1 << BUZZER_PIN);
+    buzzerPin.setHigh();
 }
 
 void Buzzer::setBuzzerOff()
 {
-    BUZZER_PORT &= ~(1 << BUZZER_PIN);
+    buzzerPin.setLow();
 }
